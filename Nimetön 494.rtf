@@ -1,0 +1,156 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 /* \
+ * VAXION_TITAN_ENGINE - Advanced Microarchitectural Latency & Speculation Research Tool\
+ * ----------------------------------------------------------------------------------\
+ * This engine is designed for high-precision measurement of AVX-512 execution \
+ * pipelines and speculative memory orchestration on x86_64 architectures.\
+ *\
+ * Key features:\
+ * - AVX-512 Warmup: Eliminates VPU activation penalties and frequency throttling.\
+ * - Huge Page Support: Utilizes MAP_HUGETLB to minimize TLB pressure and walk latency.\
+ * - Deterministic Timing: Uses RDTSCP with strict LFENCE/MFENCE serialization.\
+ * - Anti-Prefetching: Implements Fisher-Yates shuffled indexing to bypass HW prefetchers.\
+ * - Outlier Rejection: Filters system interrupts during threshold calibration.\
+ * - Memory Pinning: Uses mlock() to prevent page swaps and OS interference.\
+ *\
+ * Compilation: gcc -O3 -march=skylake-avx512 koodi.c -o vaxion_titan_mode\
+ */\
+\
+#define _GNU_SOURCE\
+#include <immintrin.h>\
+#include <stdint.h>\
+#include <stdio.h>\
+#include <stdlib.h>\
+#include <string.h>\
+#include <x86intrin.h>\
+#include <sys/mman.h>\
+#include <sched.h>\
+#include <unistd.h>\
+#include <errno.h>\
+\
+#ifndef MAP_HUGETLB\
+#define MAP_HUGETLB 0x40000\
+#endif\
+\
+static inline size_t get_page_size() \{ return sysconf(_SC_PAGESIZE); \}\
+\
+void shuffle_indices(int *indices, int n) \{\
+    for (int i = n - 1; i > 0; i--) \{\
+        int j = rand() % (i + 1);\
+        int tmp = indices[i];\
+        indices[i] = indices[j];\
+        indices[j] = tmp;\
+    \}\
+\}\
+\
+static inline void vaxion_warmup() \{\
+    __m512i d = _mm512_set1_epi64(0xAF);\
+    for (int i = 0; i < 1000000; i++) \{\
+        d = _mm512_add_epi64(d, d);\
+        asm volatile("" : "+v"(d));\
+    \}\
+    _mm256_zeroupper(); \
+\}\
+\
+static inline uint64_t get_latency(void *ptr) \{\
+    uint32_t aux;\
+    uint64_t t1, t2;\
+    _mm_mfence(); _mm_lfence();\
+    t1 = __rdtscp(&aux);\
+    _mm_lfence();\
+    (void)*(volatile uint64_t *)ptr;\
+    _mm_lfence();\
+    t2 = __rdtscp(&aux);\
+    _mm_lfence();\
+    return t2 - t1;\
+\}\
+\
+void vaxion512_hybrid_engine(uint64_t *res, void *target, void *oracle, int *indices, size_t pg_size) \{\
+    for (int i = 0; i < 1000; i++) \{\
+        size_t r_idx = indices[i % 256] * pg_size;\
+        asm volatile (\
+            "mfence\\n\\t"\
+            "lfence\\n\\t"\
+            "rdtscp\\n\\t"\
+            "mov %%eax, %%esi\\n\\t"\
+            "mov $512, %%rcx\\n\\t"\
+            "v_sync: pause\\n\\t"\
+            "dec %%rcx\\n\\t"\
+            "jnz v_sync\\n\\t"\
+            "vmovdqa64 (%1), %%zmm0\\n\\t"\
+            "vptestmq %%zmm0, %%zmm0, %%k1\\n\\t"\
+            "kmovq %%k1, %%rax\\n\\t"\
+            "and $0xFF, %%rax\\n\\t"\
+            "shl $12, %%rax\\n\\t"\
+            "clflush (%1)\\n\\t"\
+            "lfence\\n\\t"\
+            "movq (%2, %%rax), %%rbx\\n\\t"\
+            "rdtscp\\n\\t"\
+            "sub %%esi, %%eax\\n\\t"\
+            "mov %%eax, %0\\n\\t"\
+            "lfence\\n\\t"\
+            : "=m"(res[i]) \
+            : "r"(target), "r"(oracle) \
+            : "rax", "rbx", "rcx", "rdx", "rsi", "zmm0", "k1", "memory"\
+        );\
+    \}\
+    _mm256_zeroupper();\
+\}\
+\
+int main() \{\
+    cpu_set_t cpuset; CPU_ZERO(&cpuset); CPU_SET(0, &cpuset);\
+    sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);\
+\
+    size_t pg_size = get_page_size();\
+    size_t oracle_size = 512 * pg_size;\
+    \
+    void *oracle = mmap(NULL, oracle_size, PROT_READ | PROT_WRITE, \
+                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB | MAP_POPULATE, -1, 0);\
+    \
+    if (oracle == MAP_FAILED) \{\
+        oracle = aligned_alloc(2097152, oracle_size);\
+    \}\
+\
+    void *target = aligned_alloc(pg_size, pg_size);\
+    mlock(oracle, oracle_size);\
+    mlock(target, pg_size);\
+\
+    uint64_t *results = calloc(1024, sizeof(uint64_t));\
+    int indices[256];\
+    for(int i=0; i<256; i++) indices[i] = i;\
+    shuffle_indices(indices, 256);\
+\
+    memset(oracle, 0xAB, oracle_size);\
+    memset(target, 0x01, 64);\
+\
+    vaxion_warmup();\
+\
+    uint64_t h = 0, m = 0;\
+    for(int i=0; i<500; i++) \{\
+        _mm_clflush(target);\
+        uint64_t m_val = get_latency(target);\
+        uint64_t h_val = get_latency(target);\
+        if (m_val < 1000 && h_val < 1000) \{\
+            m += m_val; h += h_val;\
+        \} else \{ i--; \}\
+    \}\
+    uint64_t threshold = (h/500 + m/500) / 2;\
+    \
+    vaxion512_hybrid_engine(results, target, oracle, indices, pg_size);\
+\
+    int hits = 0;\
+    for(int i=0; i<1000; i++) if(results[i] < threshold) hits++;\
+    printf("%d\\n", hits);\
+\
+    munlock(oracle, oracle_size);\
+    munlock(target, pg_size);\
+    free(results);\
+    return 0;\
+\}\
+}

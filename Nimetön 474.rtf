@@ -1,0 +1,128 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 use std::num::Wrapping;\
+\
+const P1: u64 = 157;\
+const P2: u64 = 311;\
+const PHI: f64 = 1.618033988749895;\
+\
+#[repr(align(32))]\
+pub struct VAxion512 \{\
+    anchor_ka: [u8; 64],\
+    lut_error_pos: [u16; 1024],\
+\}\
+\
+impl VAxion512 \{\
+    pub fn new(anchor: [u8; 64]) -> Self \{\
+        let mut lut = [0u16; 1024];\
+        for i in 0..1024 \{\
+            lut[i] = ((i as f64 * PHI).fract() * 512.0) as u16;\
+        \}\
+        VAxion512 \{\
+            anchor_ka: anchor,\
+            lut_error_pos: lut,\
+        \}\
+    \}\
+\
+    pub fn state_recovery(&self, m_in: [u64; 8], f_clk: u64) -> [u64; 8] \{\
+        #[cfg(target_arch = "x86_64")]\
+        \{\
+            if is_x86_feature_detected!("avx2") \{\
+                return unsafe \{ self.state_recovery_avx2(m_in, f_clk) \};\
+            \}\
+        \}\
+        self.state_recovery_scalar(m_in, f_clk)\
+    \}\
+\
+    #[target_feature(enable = "avx2")]\
+    unsafe fn state_recovery_avx2(&self, m_in: [u64; 8], f_clk: u64) -> [u64; 8] \{\
+        use std::arch::x86_64::*;\
+        let delta_p = (f_clk * P1) % P2;\
+        let shift_val = (delta_p % 64) as i64;\
+        let mut out = [0u64; 8];\
+\
+        if shift_val == 0 \{\
+            for i in (0..8).step_by(4) \{\
+                let m_vec = _mm256_loadu_si256(m_in[i..].as_ptr() as *const __m256i);\
+                let k_vec = _mm256_load_si256(self.anchor_ka[i * 8..].as_ptr() as *const __m256i);\
+                let res = _mm256_xor_si256(m_vec, k_vec);\
+                _mm256_storeu_si256(out[i..].as_mut_ptr() as *mut __m256i, res);\
+            \}\
+            return out;\
+        \}\
+\
+        let shift = _mm_cvtsi64_si128(shift_val);\
+        let shift_inv = _mm_cvtsi64_si128(64 - shift_val);\
+\
+        for i in (0..8).step_by(4) \{\
+            let m_vec = _mm256_loadu_si256(m_in[i..].as_ptr() as *const __m256i);\
+            let k_vec = _mm256_load_si256(self.anchor_ka[i * 8..].as_ptr() as *const __m256i);\
+            \
+            let rotated = _mm256_or_si256(\
+                _mm256_srl_epi64(m_vec, shift),\
+                _mm256_sll_epi64(m_vec, shift_inv)\
+            );\
+            \
+            let res = _mm256_xor_si256(rotated, k_vec);\
+            _mm256_storeu_si256(out[i..].as_mut_ptr() as *mut __m256i, res);\
+        \}\
+        out\
+    \}\
+\
+    fn state_recovery_scalar(&self, m_in: [u64; 8], f_clk: u64) -> [u64; 8] \{\
+        let delta_p = (f_clk * P1) % P2;\
+        let mut s_sync = [0u64; 8];\
+        for i in 0..8 \{\
+            let k_a_part = u64::from_le_bytes(self.anchor_ka[i*8..(i+1)*8].try_into().unwrap());\
+            s_sync[i] = (m_in[i].rotate_right(delta_p as u32)) ^ k_a_part;\
+        \}\
+        s_sync\
+    \}\
+\
+    pub fn ghost_fold_correction(&self, s_rec: &mut [u64; 8], g_obs: u64, g_exp: u64) -> bool \{\
+        let r = (Wrapping(g_obs) - Wrapping(g_exp)).0;\
+        if r != 0 \{\
+            let pos = self.lut_error_pos[(r & 1023) as usize];\
+            s_rec[(pos >> 6) as usize] ^= 1 << (pos & 63);\
+        \}\
+        \
+        #[cfg(target_arch = "x86_64")]\
+        \{\
+            if is_x86_feature_detected!("avx2") \{\
+                return unsafe \{ self.verify_parity_avx2(s_rec) \};\
+            \}\
+        \}\
+        self.verify_parity_scalar(s_rec)\
+    \}\
+\
+    #[target_feature(enable = "avx2")]\
+    unsafe fn verify_parity_avx2(&self, data: &[u64; 8]) -> bool \{\
+        use std::arch::x86_64::*;\
+        let v1 = _mm256_loadu_si256(data[0..].as_ptr() as *const __m256i);\
+        let v2 = _mm256_loadu_si256(data[4..].as_ptr() as *const __m256i);\
+        let res_v = _mm256_xor_si256(v1, v2);\
+        \
+        let low = _mm256_castsi256_si128(res_v);\
+        let high = _mm256_extracti128_si256(res_v, 1);\
+        let final_128 = _mm_xor_si128(low, high);\
+        \
+        let mut temp = [0u64; 2];\
+        _mm_storeu_si128(temp.as_mut_ptr() as *mut __m128i, final_128);\
+        (temp[0] ^ temp[1]) == 0\
+    \}\
+\
+    fn verify_parity_scalar(&self, data: &[u64; 8]) -> bool \{\
+        (data[0..4].iter().fold(0, |a, &x| a ^ x) ^ \
+         data[4..8].iter().fold(0, |a, &x| a ^ x)) == 0\
+    \}\
+\
+    pub fn check_drift(&self, d_n: f64, d_prev: f64, threshold: f64) -> bool \{\
+        (d_n - d_prev).abs() * PHI > threshold\
+    \}\
+\}\
+}

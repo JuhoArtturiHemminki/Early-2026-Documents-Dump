@@ -1,0 +1,179 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 /* \
+ * VAXION_TITAN_ENGINE v3.0 - "Absolute Zero" Edition\
+ * ----------------------------------------------------------------------------------\
+ * Advanced Microarchitectural Research Tool for AVX-512 Speculation Analysis.\
+ *\
+ * Compilation: gcc -O3 -march=skylake-avx512 koodi.c -o vaxion_titan_v3\
+ */\
+\
+#define _GNU_SOURCE\
+#include <immintrin.h>\
+#include <stdint.h>\
+#include <stdio.h>\
+#include <stdlib.h>\
+#include <string.h>\
+#include <x86intrin.h>\
+#include <sys/mman.h>\
+#include <sched.h>\
+#include <unistd.h>\
+#include <errno.h>\
+\
+/* Define Huge Page flag if not present in headers */\
+#ifndef MAP_HUGETLB\
+#define MAP_HUGETLB 0x40000\
+#endif\
+\
+/* Retrieve system page size dynamically to avoid hardcoded 4096 assumptions */\
+static inline size_t get_page_size() \{ return sysconf(_SC_PAGESIZE); \}\
+\
+/* Comparator for qsort to calculate the median latency, ensuring outlier rejection */\
+int compare_uint64(const void *a, const void *b) \{\
+    uint64_t arg1 = *(const uint64_t *)a;\
+    uint64_t arg2 = *(const uint64_t *)b;\
+    if (arg1 < arg2) return -1;\
+    if (arg1 > arg2) return 1;\
+    return 0;\
+\}\
+\
+/* Fisher-Yates shuffle to randomize memory access patterns and defeat HW prefetchers */\
+void shuffle_indices(int *indices, int n) \{\
+    for (int i = n - 1; i > 0; i--) \{\
+        int j = rand() % (i + 1);\
+        int tmp = indices[i];\
+        indices[i] = indices[j];\
+        indices[j] = tmp;\
+    \}\
+\}\
+\
+/* \
+ * AVX-512 Heavy Latency Measurement.\
+ * Uses a dummy AVX-512 operation (vaddpd) to lock the CPU into the heavy \
+ * AVX-512 P-state (Power Level 2), ensuring calibration matches engine conditions.\
+ */\
+static inline uint64_t get_latency_avx_locked(void *ptr) \{\
+    uint32_t aux;\
+    uint64_t t1, t2;\
+    __m512i dummy = _mm512_set1_epi64(0);\
+    \
+    _mm_mfence(); _mm_lfence();\
+    t1 = __rdtscp(&aux);\
+    _mm_lfence();\
+    \
+    /* Inject AVX-512 instruction to maintain frequency offset (Downclocking lock) */\
+    asm volatile ("vaddpd %0, %0, %0" : "+v"(dummy)); \
+    (void)*(volatile uint64_t *)ptr;\
+    \
+    _mm_lfence();\
+    t2 = __rdtscp(&aux);\
+    _mm_lfence();\
+    return t2 - t1;\
+\}\
+\
+/* Extended warmup to trigger VPU power-up and stabilize frequency across the core */\
+static inline void vaxion_warmup() \{\
+    __m512i d = _mm512_set1_epi64(0xAF);\
+    for (int i = 0; i < 2000000; i++) \{\
+        d = _mm512_add_epi64(d, d);\
+        asm volatile("" : "+v"(d));\
+    \}\
+\}\
+\
+/* \
+ * Core Hybrid Engine:\
+ * Synchronizes execution with a pause-loop, performs speculative AVX-512 \
+ * load-to-mask transition, and measures timing of the resulting oracle probe.\
+ */\
+void vaxion512_hybrid_engine(uint64_t *res, void *target, void *oracle, int *indices, size_t pg_size) \{\
+    for (int i = 0; i < 1000; i++) \{\
+        size_t r_idx = indices[i % 256] * pg_size;\
+        asm volatile (\
+            "mfence\\n\\t"\
+            "lfence\\n\\t"\
+            "rdtscp\\n\\t"\
+            "mov %%eax, %%esi\\n\\t"\
+            "mov $512, %%rcx\\n\\t"\
+            "v_sync: pause\\n\\t"      /* Stall to allow speculative window expansion */\
+            "dec %%rcx\\n\\t"\
+            "jnz v_sync\\n\\t"\
+            "vmovdqa64 (%1), %%zmm0\\n\\t"\
+            "vptestmq %%zmm0, %%zmm0, %%k1\\n\\t"\
+            "kmovq %%k1, %%rax\\n\\t"  /* Transfer mask to GPR for speculative address calc */\
+            "and $0xFF, %%rax\\n\\t"\
+            "shl $12, %%rax\\n\\t"     /* Align to page boundaries */\
+            "clflush (%1)\\n\\t"\
+            "lfence\\n\\t"\
+            "movq (%2, %%rax), %%rbx\\n\\t" /* Speculative probe into oracle */\
+            "rdtscp\\n\\t"\
+            "sub %%esi, %%eax\\n\\t"\
+            "mov %%eax, %0\\n\\t"\
+            "lfence\\n\\t"\
+            : "=m"(res[i]) \
+            : "r"(target), "r"(oracle) \
+            : "rax", "rbx", "rcx", "rdx", "rsi", "zmm0", "k1", "memory"\
+        );\
+    \}\
+    _mm256_zeroupper(); /* Reset AVX state to prevent legacy SSE performance drops */\
+\}\
+\
+int main() \{\
+    /* Pin process to Core 0 to minimize context switch noise */\
+    cpu_set_t cpuset; CPU_ZERO(&cpuset); CPU_SET(0, &cpuset);\
+    sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);\
+\
+    size_t pg_size = get_page_size();\
+    size_t oracle_size = 512 * pg_size;\
+    \
+    /* Attempt Huge Page allocation for minimal TLB walk latency */\
+    void *oracle = mmap(NULL, oracle_size, PROT_READ | PROT_WRITE, \
+                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB | MAP_POPULATE, -1, 0);\
+    /* Fallback to 2MB aligned standard pages if Huge Pages are unavailable */\
+    if (oracle == MAP_FAILED) oracle = aligned_alloc(2097152, oracle_size);\
+\
+    void *target = aligned_alloc(pg_size, pg_size);\
+    \
+    /* Lock memory in RAM to prevent kernel swapping or minor page faults */\
+    mlock(oracle, oracle_size);\
+    mlock(target, pg_size);\
+\
+    uint64_t *results = calloc(1024, sizeof(uint64_t));\
+    uint64_t h_cal[500], m_cal[500];\
+    int indices[256];\
+    for(int i=0; i<256; i++) indices[i] = i;\
+    shuffle_indices(indices, 256);\
+\
+    memset(oracle, 0xAB, oracle_size);\
+    memset(target, 0x01, 64);\
+\
+    vaxion_warmup();\
+\
+    /* Calibration: Use median of 500 samples to find the optimal Cache Hit/Miss threshold */\
+    for(int i=0; i<500; i++) \{\
+        _mm_clflush(target);\
+        m_cal[i] = get_latency_avx_locked(target);\
+        h_cal[i] = get_latency_avx_locked(target);\
+    \}\
+    qsort(m_cal, 500, sizeof(uint64_t), compare_uint64);\
+    qsort(h_cal, 500, sizeof(uint64_t), compare_uint64);\
+    \
+    /* Threshold sits between the median hit and median miss latency */\
+    uint64_t threshold = (h_cal[250] + m_cal[250]) / 2;\
+    \
+    vaxion512_hybrid_engine(results, target, oracle, indices, pg_size);\
+\
+    int hits = 0;\
+    for(int i=0; i<1000; i++) if(results[i] < threshold) hits++;\
+    printf("%d\\n", hits);\
+\
+    /* Cleanup: Release locked memory and buffers */\
+    munlock(oracle, oracle_size); munlock(target, pg_size);\
+    free(results);\
+    return 0;\
+\}\
+}

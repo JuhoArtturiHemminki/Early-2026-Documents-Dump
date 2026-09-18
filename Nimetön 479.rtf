@@ -1,0 +1,111 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 impl VAxion512 \{\
+    pub fn process_batch_safe(\
+        &self,\
+        m_in: *const [u64; 8],\
+        o_ptr: *mut [u64; 8],\
+        f_clks: [u64; 4],\
+    ) -> Option<([u16; 4], u8)> \{\
+        if is_x86_feature_detected!("avx512f") && is_x86_feature_detected!("avx512dq") \{\
+            debug_assert!(m_in as usize % 64 == 0);\
+            debug_assert!(o_ptr as usize % 64 == 0);\
+            unsafe \{ Some(self.process_batch_x4(m_in, o_ptr, f_clks)) \}\
+        \} else \{\
+            None\
+        \}\
+    \}\
+\
+    #[inline(always)]\
+    #[target_feature(enable = "avx512f,avx512dq")]\
+    pub unsafe fn process_batch_x4(\
+        &self,\
+        m_in: *const [u64; 8],\
+        o_ptr: *mut [u64; 8],\
+        f_clks: [u64; 4],\
+    ) -> ([u16; 4], u8) \{\
+        let mut errors = [0u16; 4];\
+        let parity_mask: u8;\
+\
+        let e0 = self.combined_lut.get_unchecked((f_clks[0] & 1023) as usize);\
+        let e1 = self.combined_lut.get_unchecked((f_clks[1] & 1023) as usize);\
+        let e2 = self.combined_lut.get_unchecked((f_clks[2] & 1023) as usize);\
+        let e3 = self.combined_lut.get_unchecked((f_clks[3] & 1023) as usize);\
+\
+        errors[0] = e0.error_val;\
+        errors[1] = e1.error_val;\
+        errors[2] = e2.error_val;\
+        errors[3] = e3.error_val;\
+\
+        let k_ptr = self.anchor_ka.as_ptr();\
+\
+        asm!(\
+            "vmovdqa64 \{z_k\}, [\{k_ptr\}]",\
+\
+            "vpbroadcastq \{z_m0\}, \{r0\}",\
+            "vpbroadcastq \{z_r0\}, \{d0\}",\
+            "vmovdqa64 \{z0\}, [\{m_ptr\}]",\
+            "vpxorq \{z0\}, \{z0\}, \{z_m0\}",\
+            "vprorvq \{z0\}, \{z0\}, \{z_r0\}",\
+            "vpxorq \{z0\}, \{z0\}, \{z_k\}",\
+            "vmovdqa64 [\{o_ptr\}], \{z0\}",\
+\
+            "vpbroadcastq \{z_m1\}, \{r1\}",\
+            "vpbroadcastq \{z_r1\}, \{d1\}",\
+            "vmovdqa64 \{z1\}, [\{m_ptr\} + 64]",\
+            "vpxorq \{z1\}, \{z1\}, \{z_m1\}",\
+            "vprorvq \{z1\}, \{z1\}, \{z_r1\}",\
+            "vpxorq \{z1\}, \{z1\}, \{z_k\}",\
+            "vmovdqa64 [\{o_ptr\} + 64], \{z1\}",\
+\
+            "vpbroadcastq \{z_m2\}, \{r2\}",\
+            "vpbroadcastq \{z_r2\}, \{d2\}",\
+            "vmovdqa64 \{z2\}, [\{m_ptr\} + 128]",\
+            "vpxorq \{z2\}, \{z2\}, \{z_m2\}",\
+            "vprorvq \{z2\}, \{z2\}, \{z_r2\}",\
+            "vpxorq \{z2\}, \{z2\}, \{z_k\}",\
+            "vmovdqa64 [\{o_ptr\} + 128], \{z2\}",\
+\
+            "vpbroadcastq \{z_m3\}, \{r3\}",\
+            "vpbroadcastq \{z_r3\}, \{d3\}",\
+            "vmovdqa64 \{z3\}, [\{m_ptr\} + 192]",\
+            "vpxorq \{z3\}, \{z3\}, \{z_m3\}",\
+            "vprorvq \{z3\}, \{z3\}, \{z_r3\}",\
+            "vpxorq \{z3\}, \{z3\}, \{z_k\}",\
+            "vmovdqa64 [\{o_ptr\} + 192], \{z3\}",\
+\
+            "vporq \{z0\}, \{z0\}, \{z1\}",\
+            "vporq \{z2\}, \{z2\}, \{z3\}",\
+            "vporq \{z0\}, \{z0\}, \{z2\}",\
+            "vptestmq \{k_res\}, \{z0\}, \{z0\}",\
+            "kmovb \{p_mask:e\}, \{k_res\}",\
+\
+            k_ptr = in(reg) k_ptr,\
+            m_ptr = in(reg) m_in,\
+            o_ptr = in(reg) o_ptr,\
+            d0 = in(reg) e0.delta_p as i64,\
+            r0 = in(reg) e0.repair_mask as u64,\
+            d1 = in(reg) e1.delta_p as i64,\
+            r1 = in(reg) e1.repair_mask as u64,\
+            d2 = in(reg) e2.delta_p as i64,\
+            r2 = in(reg) e2.repair_mask as u64,\
+            d3 = in(reg) e3.delta_p as i64,\
+            r3 = in(reg) e3.repair_mask as u64,\
+            p_mask = out(reg) parity_mask,\
+            z_k = out(zmm_reg) _,\
+            z0 = out(zmm_reg) _, z1 = out(zmm_reg) _, z2 = out(zmm_reg) _, z3 = out(zmm_reg) _,\
+            z_m0 = out(zmm_reg) _, z_m1 = out(zmm_reg) _, z_m2 = out(zmm_reg) _, z_m3 = out(zmm_reg) _,\
+            z_r0 = out(zmm_reg) _, z_r1 = out(zmm_reg) _, z_r2 = out(zmm_reg) _, z_r3 = out(zmm_reg) _,\
+            k_res = out(kreg) _,\
+            options(nostack, preserves_flags)\
+        );\
+\
+        (errors, parity_mask)\
+    \}\
+\}\
+}

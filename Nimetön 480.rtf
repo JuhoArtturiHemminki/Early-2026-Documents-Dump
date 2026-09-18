@@ -1,0 +1,107 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\froman\fcharset0 Times-Roman;}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;}
+{\*\listtable{\list\listtemplateid1\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid1\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid1}
+{\list\listtemplateid2\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid101\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid2}
+{\list\listtemplateid3\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat2\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid201\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid3}
+{\list\listtemplateid4\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat3\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid301\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid4}
+{\list\listtemplateid5\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid401\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid5}
+{\list\listtemplateid6\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat4\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid501\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid6}
+{\list\listtemplateid7\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat5\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid601\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid7}
+{\list\listtemplateid8\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat6\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid701\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid8}}
+{\*\listoverridetable{\listoverride\listid1\listoverridecount0\ls1}{\listoverride\listid2\listoverridecount0\ls2}{\listoverride\listid3\listoverridecount0\ls3}{\listoverride\listid4\listoverridecount0\ls4}{\listoverride\listid5\listoverridecount0\ls5}{\listoverride\listid6\listoverridecount0\ls6}{\listoverride\listid7\listoverridecount0\ls7}{\listoverride\listid8\listoverridecount0\ls8}}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab720
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 \expnd0\expndtw0\kerning0
+VAXION512 - ARCHITECTURAL DESIGN SPECIFICATION (MATHEMATICAL EDITION)\
+Version: 1.1.0\
+Target Architecture: Intel x86_64 (AVX-512F, AVX-512DQ)\
+Classification: Technical / Mathematical Documentation\
+Status: Final Release\
+\
+\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls1\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+MATHEMATICAL MODEL\
+\pard\pardeftab720\partightenfactor0
+\cf0 The algorithm executes a vector transformation V_in -> V_out leveraging 512-bit parallelism. Let M be an input vector consisting of eight 64-bit words:\
+M = [m_0, m_1, ..., m_7], where m_i is an element of \{0, 1\}^64\
+Each batch processes four such vectors (M_0, M_1, M_2, M_3). The transformation equation for a single vector is defined as:\
+V_out = ((V_in XOR R_mask) >>> Delta_p) XOR K_anchor\
+Where:\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls2\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+XOR represents the exclusive OR bitwise operation.\
+\ls2\ilvl0\kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+represents the Circular Right Rotation.\uc0\u8232 \u8232 \
+\ls2\ilvl0\kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+R_mask is the correction mask retrieved from the LUT (broadcasted to 512-bit width).\
+\ls2\ilvl0\kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Delta_p is the rotation magnitude.\
+\ls2\ilvl0\kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+K_anchor is the fixed 512-bit anchor vector.\
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls3\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+TECHNICAL IMPLEMENTATION AND EQUATION MAPPING\
+\pard\pardeftab720\partightenfactor0
+\cf0 2.1. Bit-Level Parallelism (Data Expansion)\
+When a value 'r' is retrieved from the LUT (R_mask), it is expanded (broadcasted) into a vector:\
+vec(R) = [r, r, r, r, r, r, r, r]\
+This enables SIMD (Single Instruction, Multiple Data) operations, where eight words are transformed simultaneously.\
+2.2. The Rotation Engine (Circular Shift)\
+In standard algebra, a right shift (>>) discards bits. VAxion512 utilizes the 'vprorvq' instruction, which implements mathematical rotation:\
+(x >>> n) = (x >> n) OR (x << (64 - n))\
+This preserves the entropy of the data, which is critical for the algorithm's determinism.\
+\
+\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls4\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	3	}\expnd0\expndtw0\kerning0
+ASSEMBLY OPERATION CYCLE ANALYSIS\
+\pard\pardeftab720\partightenfactor0
+\cf0 Operations are chained to ensure the Intel instruction pipeline remains saturated without stalls.\
+\
+Phase | Intel Instruction | Mathematical Operation | Explanation\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls5\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+Load | vmovdqa64 | Z_k <- K_anchor | Load anchor from cache.\
+\ls5\ilvl0\kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+XOR I | vpxorq | Z_0 <- M_in XOR vec(R) | Primary mixing phase.\
+\ls5\ilvl0\kerning1\expnd0\expndtw0 {\listtext	3	}\expnd0\expndtw0\kerning0
+Rotate | vprorvq | Z_0 <- Z_0 >>> vec(Delta) | Vectorized rotation (8 words).\
+\ls5\ilvl0\kerning1\expnd0\expndtw0 {\listtext	4	}\expnd0\expndtw0\kerning0
+XOR II | vpxorq | Z_0 <- Z_0 XOR Z_k | Final anchoring phase.\
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls6\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	4	}\expnd0\expndtw0\kerning0
+ERROR DETECTION (PARITY FUNCTION)\
+\pard\pardeftab720\partightenfactor0
+\cf0 Finally, the algorithm calculates a parity mask P_mask according to the following logic:\
+P_mask = Sum from j=0 to 3 of ( [V_out,j != 0] * 2^j )\
+In practice, if a single bit in the vector V_out is set to 1, the corresponding bit in the mask register activates. This is implemented via the 'vptestmq' instruction, which is mathematically:\
+k_res = NOT (Z_out AND Z_out == 0)\
+\
+\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls7\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	5	}\expnd0\expndtw0\kerning0
+THEORETICAL PERFORMANCE PEAK\
+\pard\pardeftab720\partightenfactor0
+\cf0 On Intel processors equipped with dual 512-bit FMA units (e.g., Xeon Ice Lake), the theoretical throughput (T_max) is:\
+T_max = 2 instructions/cycle * 64 bytes/instruction * f (Hz)\
+At a 3.0 GHz clock frequency, this results in:\
+T_max = 2 * 64 * 3.0 * 10^9 approx. 384 GB/s (from L1 Cache)\
+\
+\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls8\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	6	}\expnd0\expndtw0\kerning0
+SUMMARY\
+\pard\pardeftab720\partightenfactor0
+\cf0 VAxion512 is a deterministic vector transformer utilizing bit-level parallelism and Intel\'92s specialized rotation hardware. It is mathematically lossless (due to entropy-preserving rotation) and optimized to minimize memory fetches relative to compute cycles (High Arithmetic Intensity).\
+}

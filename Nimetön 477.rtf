@@ -1,0 +1,68 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 use std::arch::asm;\
+use std::arch::x86_64::*;\
+\
+#[repr(align(64))]\
+pub struct VAxion512 \{\
+    pub anchor_ka: [u64; 8],\
+    pub lut_error_pos: [u16; 1024],\
+\}\
+\
+impl VAxion512 \{\
+    #[inline(always)]\
+    pub unsafe fn process_block_ultra(\
+        &self, \
+        m_in: *const u64, \
+        next_m_in: *const u64, \
+        f_clk: u64\
+    ) -> ([u64; 8], u16) \{\
+        let mut out = std::mem::MaybeUninit::<[u64; 8]>::uninit();\
+        \
+        let delta_p = ((f_clk.wrapping_mul(157) % 311) & 63) as i32;\
+        let lut_idx = (f_clk & 1023) as usize;\
+        let error_val = *self.lut_error_pos.get_unchecked(lut_idx);\
+\
+        _mm_prefetch(next_m_in as *const i8, _MM_HINT_T0);\
+\
+        asm!(\
+            "vmovdqu64 \{z_res\}, [\{m_ptr\}]",\
+            "vprorq \{z_res\}, \{z_res\}, \{rot\}",\
+            "vpxorq \{z_res\}, \{z_res\}, [\{k_ptr\}]",\
+            "vmovdqu64 [\{out_ptr\}], \{z_res\}",\
+            m_ptr = in(reg) m_in,\
+            k_ptr = in(reg) self.anchor_ka.as_ptr(),\
+            out_ptr = in(reg) out.as_mut_ptr(),\
+            rot = in(reg) delta_p,\
+            z_res = out(zmm_reg) _,\
+            options(nostack, preserves_flags)\
+        );\
+\
+        (out.assume_init(), error_val)\
+    \}\
+\
+    #[inline(always)]\
+    pub unsafe fn fast_parity_check_asm(&self, data: &[u64; 8]) -> bool \{\
+        let is_zero: u8;\
+        asm!(\
+            "vmovdqu64 \{zmm\}, [\{ptr\}]",\
+            "vptestmq \{k\}, \{zmm\}, \{zmm\}",\
+            "kmovw \{res:e\}, \{k\}",\
+            "test \{res:e\}, \{res:e\}",\
+            "setz \{is_zero\}",\
+            ptr = in(reg) data.as_ptr(),\
+            k = out(kreg) _,\
+            zmm = out(zmm_reg) _,\
+            res = out(reg) _,\
+            is_zero = out(reg_byte) is_zero,\
+            options(nostack, preserves_flags)\
+        );\
+        is_zero != 0\
+    \}\
+\}\
+}

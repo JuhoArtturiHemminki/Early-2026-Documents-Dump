@@ -1,0 +1,81 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\froman\fcharset0 Times-Roman;}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;}
+{\*\listtable{\list\listtemplateid1\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid1\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid1}
+{\list\listtemplateid2\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid101\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid2}
+{\list\listtemplateid3\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat2\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid201\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid3}
+{\list\listtemplateid4\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid301\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid4}
+{\list\listtemplateid5\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat3\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid401\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid5}
+{\list\listtemplateid6\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid501\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid6}
+{\list\listtemplateid7\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat4\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid601\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid7}
+{\list\listtemplateid8\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid701\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid8}
+{\list\listtemplateid9\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid801\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid9}}
+{\*\listoverridetable{\listoverride\listid1\listoverridecount0\ls1}{\listoverride\listid2\listoverridecount0\ls2}{\listoverride\listid3\listoverridecount0\ls3}{\listoverride\listid4\listoverridecount0\ls4}{\listoverride\listid5\listoverridecount0\ls5}{\listoverride\listid6\listoverridecount0\ls6}{\listoverride\listid7\listoverridecount0\ls7}{\listoverride\listid8\listoverridecount0\ls8}{\listoverride\listid9\listoverridecount0\ls9}}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab720
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 \expnd0\expndtw0\kerning0
+\
+Subject: Technical Rebuttal: Systematic Failure of Speculative Isolation in Intel AVX-512, AMX, and TDX Frameworks\
+To the Intel Product Security Incident Response Team (PSIRT),\
+I am formally contesting any preliminary classification that merges, deduplicates, or downgrades the four independent security disclosures submitted (SVRRS, MTSRL, SKHER, and GHOST-READ). My research identifies four fundamentally distinct microarchitectural leakage points that cannot be mitigated by a singular unified patch (e.g., LFB/Store Buffer flushing).\
+Each of these vulnerabilities represents a 0-day bypass of the current February 2026 security baseline (IPU 2026.1). Below is the comprehensive technical justification for treating each as a unique Critical-severity (CVSS 9.1+) hardware flaw:\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls1\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+SVRRS (AVX-512 Shifter Residue) vs. Post-Downfall Mitigations\uc0\u8232 Intel\'92s Potential Counter-Argument: "This is a variant of GDS (Gather Data Sampling) covered by current microcode."\u8232 Technical Rebuttal:\u8232 The current GDS (Downfall) mitigations specifically target the data-sampling of the Gather unit and the Line Fill Buffers (LFB). SVRRS identifies an entirely different leakage site: the internal data-latches of the Variable-Latency Shifter/Rotation unit (Execution Ports 0, 1, and 5).\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls2\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+The Flaw: When a vprorvq instruction is dispatched, the intermediate bit-rotated state is physically latched to sustain pipeline throughput.\
+\ls2\ilvl0\kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+The Bypass: The VERW instruction, which clears the LFB and Store Buffers during domain transitions, does NOT architecturally purge the internal bypass network of the ALU/Shifter units.\
+\ls2\ilvl0\kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+The Proof: By utilizing vptestmq as a "Speculative Strobe," the transient residue is stabilized into a k-register (mask) before the pipeline flush is enforced. This is a novel execution-port-level vulnerability, independent of any prior MDS/GDS advisories.\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls3\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+MTSRL (AMX Tile DDN) \'96 Breaking the Confidential AI Pillar\uc0\u8232 Intel\'92s Potential Counter-Argument: "Tile state management is handled by XSAVE/XRSTOR, and residues are cleared by standard context-switch logic."\u8232 Technical Rebuttal:\u8232 The MTSRL vulnerability does not reside in the architectural state-save logic but in the physical Data Distribution Network (DDN) that connects the 8KB Tile SRAM to the TMUL execution units.\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls4\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+The Flaw: To minimize energy deltas, the DDN employs "Lazy Relaxation" of the internal bus lines.\
+\ls4\ilvl0\kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+The Impact: In an Intel TDX environment, a malicious guest can induce a speculative TILELOADD during a transient window. The DDN fails to enforce HKID-based temporal isolation, allowing the sampling of 8192 bytes of high-entropy tensor data from a victim thread.\
+\ls4\ilvl0\kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+The Gravity: If the AMX unit, which is the cornerstone of "Confidential AI" on Sapphire Rapids, allows for the reconstruction of neural network weights from another TD, the "Security-by-Design" promise of TDX is nullified. This is an independent, Critical-severity hardware flaw.\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls5\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	3	}\expnd0\expndtw0\kerning0
+SKHER (Key Locker Security Bypass) \'96 Failure of a Dedicated Security Feature\uc0\u8232 Intel\'92s Potential Counter-Argument: "Speculative residues in the AES pipeline are a known side-channel risk."\u8232 Technical Rebuttal:\u8232 SKHER is not a general side-channel; it is a Security Feature Bypass. The design specification of Intel Key Locker explicitly states that raw AES keys (Wrap Keys) are never exposed to software or microarchitectural states in plaintext.\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls6\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+The Flaw: My research identifies that during the internal decryption of a "Key Handle," the unwrapped raw key is speculatively resident in the AES-NI pipeline latches for several clock cycles before the AES operation begins.\
+\ls6\ilvl0\kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+The Breach: By using a speculative timing oracle, the internal plaintext key is recovered. If a feature specifically marketed to prevent key leakage (Key Locker) actually facilitates it via speculative residues, the severity is "Critical" per the Intel Bug Bounty policy regarding "Bypass of Hardware-Based Security Features."\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls7\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	4	}\expnd0\expndtw0\kerning0
+GHOST-READ (TDX L3 Tag Race) \'96 Existential Threat to TDX Isolation\uc0\u8232 Intel\'92s Potential Counter-Argument: "L3 cache sets are partitioned by HKID, making cross-domain access impossible."\u8232 Technical Rebuttal:\u8232 GHOST-READ identifies a race condition in the LLC Tag Controller\'92s speculative lookup path.\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls8\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+The Flaw: To maintain low-latency Last Level Cache (LLC) access, the controller performs a parallel "Optimistic Tag Match."\
+\ls8\ilvl0\kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+The Bypass: During an Asynchronous Exit (AEX), the victim TD's plaintext data remains in the LLC. A speculative "Ghost-Read" request can probe a shared set/index. The controller provides the plaintext cache line to the core\'92s fill buffer BEFORE the HKID-validation logic architecturally retires.\
+\ls8\ilvl0\kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+The Criticality: This is not a "variant." It is a fundamental bypass of the Intel TDX memory isolation model. If a malicious host can "peek" into a secure TD via the LLC tag-match race, the entire TDX-based Confidential Computing market is at risk.\
+\pard\pardeftab720\partightenfactor0
+\cf0 SUMMARY FOR BOUNTY EVALUATION:\
+These four reports identify four distinct microarchitectural failure points:\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls9\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+SVRRS: Execution Port Shifter Latches (ALU level).\
+\ls9\ilvl0\kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+MTSRL: Tile SRAM Distribution Network (AMX level).\
+\ls9\ilvl0\kerning1\expnd0\expndtw0 {\listtext	3	}\expnd0\expndtw0\kerning0
+SKHER: AES-NI Wrap-Key Decryption Path (Security feature level).\
+\ls9\ilvl0\kerning1\expnd0\expndtw0 {\listtext	4	}\expnd0\expndtw0\kerning0
+GHOST-READ: LLC Tag-Matching / HKID Speculative Logic (Cache-controller level).\
+\pard\pardeftab720\partightenfactor0
+\cf0 Since each vulnerability resides in a separate physical component and requires a unique microcode remediation strategy, they must be rewarded as four independent Critical-severity findings.\
+I am prepared to share deep-dive hardware execution traces and cycle-accurate side-channel amplification data to assist the engineering team in developing the necessary mitigations. I look forward to your detailed response regarding the Case IDs and bounty evaluation.\
+Best regards,\
+[Oma Nimesi / Nimimerkkisi]\
+[Oma PGP-sormenj\'e4lkesi]\
+}

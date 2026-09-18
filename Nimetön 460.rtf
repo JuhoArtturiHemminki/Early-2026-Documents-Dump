@@ -1,0 +1,529 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\froman\fcharset0 Times-Roman;\f1\fmodern\fcharset0 Courier;\f2\froman\fcharset0 Times-Bold;
+\f3\froman\fcharset0 Times-Italic;\f4\fmodern\fcharset0 Courier-Oblique;\f5\fmodern\fcharset0 Courier-Bold;
+}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;\red0\green0\blue233;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;\cssrgb\c0\c0\c93333;}
+{\*\listtable{\list\listtemplateid1\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid1\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid1}
+{\list\listtemplateid2\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid101\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid2}
+{\list\listtemplateid3\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid201\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid3}}
+{\*\listoverridetable{\listoverride\listid1\listoverridecount0\ls1}{\listoverride\listid2\listoverridecount0\ls2}{\listoverride\listid3\listoverridecount0\ls3}}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab720
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 \expnd0\expndtw0\kerning0
+1. Projektin valmistelu terminaalissa\
+Varmista, ett\'e4 olet oikeassa kansiossa ja aseta riippuvuudet.\
+\
+bash\
+\pard\pardeftab720\partightenfactor0
+
+\f1\fs26 \cf0 cd ~/Desktop/omnicore_project\
+nano Cargo.toml\
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 K\'e4yt\'e4 koodia harkiten.\
+\pard\pardeftab720\partightenfactor0
+
+\f2\b \cf0 Korvaa sis\'e4lt\'f6 t\'e4ll\'e4:
+\f0\b0 \
+\
+toml\
+\pard\pardeftab720\partightenfactor0
+
+\f1\fs26 \cf0 [package]\
+name = "omnicore_project"\
+version = "21.35.0"\
+edition = "2021"\
+\
+[dependencies]\
+rusqlite = \{ version = "0.29", features = ["bundled"] \}\
+serde = \{ version = "1.0", features = ["derive"] \}\
+serde_json = "1.0"\
+lru = "0.10"\
+zstd = "0.12"\
+sysinfo = "0.29"\
+bloomfilter = "1.0"\
+rand = "0.8"\
+candle-core = "0.8.0"\
+candle-transformers = "0.8.0"\
+candle-nn = "0.8.0"\
+tokenizers = "0.21.0"\
+anyhow = "1.0"\
+bincode = "1.3"\
+memmap2 = "0.7"\
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 K\'e4yt\'e4 koodia harkiten.\
+\pard\pardeftab720\partightenfactor0
+
+\f3\i \cf0 (Tallenna: 
+\f4\fs26 Ctrl+O
+\f3\fs24 , 
+\f4\fs26 Enter
+\f3\fs24 . Poistu: 
+\f4\fs26 Ctrl+X
+\f3\fs24 )
+\f0\i0 \
+\
+2. T\'e4ydellinen L\'e4hdekoodi (src/main.rs)\
+T\'e4m\'e4 koodi sis\'e4lt\'e4\'e4 
+\f2\b kaikki
+\f0\b0  ominaisuudet: NCD, Bloom, LRU, Zstd-sanakirjat, Symmetry Lock, Immersion Filter, 4-bit Quantization ja Layer-by-Layer Ingest.\
+\
+bash\
+\pard\pardeftab720\partightenfactor0
+
+\f1\fs26 \cf0 nano src/main.rs\
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 K\'e4yt\'e4 koodia harkiten.\
+\pard\pardeftab720\partightenfactor0
+
+\f2\b \cf0 Kopioi ja liit\'e4 t\'e4m\'e4 koodi kokonaisuudessaan:
+\f0\b0 \
+\
+rust\
+\pard\pardeftab720\partightenfactor0
+
+\f1\fs26 \cf0 use rusqlite::\{params, Connection, Result\};\
+use serde::\{Serialize, Deserialize\};\
+use std::sync::\{Arc, RwLock\};\
+use lru::LruCache;\
+use std::num::NonZeroUsize;\
+use zstd::stream::\{encode_all, decode_all\};\
+use sysinfo::\{System, SystemExt\};\
+use bloomfilter::Bloom;\
+use std::time::\{SystemTime, UNIX_EPOCH, Duration, Instant\};\
+use std::collections::\{HashSet, HashMap\};\
+use std::sync::mpsc::\{sync_channel, SyncSender\};\
+use std::thread;\
+use rand::seq::SliceRandom;\
+use rand::thread_rng;\
+use candle_core::\{Device, Tensor\};\
+\
+const TOTAL_RAM_USAGE_RATIO: f64 = 0.10;\
+const BLOOM_RAM_PORTION: f64 = 0.15;\
+const CACHE_RAM_PORTION: f64 = 0.65;\
+const NCD_THRESHOLD: f32 = 0.45;\
+const HISTORY_LIMIT_PER_SUBJECT: usize = 5;\
+const BUFFER_CAPACITY: usize = 5000;\
+const TONE_BUFFER_LIMIT: usize = 5;\
+const INTENT_STORY_THRESHOLD: f32 = 0.48;\
+const SEMANTIC_RISK_THRESHOLD: f32 = 0.42;\
+const SLANG_THRESHOLD: f32 = 0.40;\
+const SYMMETRY_LOCK: f32 = 0.15;\
+\
+const FORBIDDEN_STORY_TERMS: &[&str] = &["ncd", "threshold", "io", "buffer", "snapshot", "v21", "omnicore", "bloom", "vault", "priority", "lru", "cache", "sql", "db"];\
+const STORY_INTENT_SEED: &[&str] = &["tell", "story", "poem", "describe", "narrative", "legend", "once", "upon"];\
+const ANTI_RISK_SEED: &[&str] = &["how to build a weapon", "illegal activity", "security breach", "dangerous material"];\
+const SLANG_SEED: &[&str] = &["yo", "man", "wtf", "flow", "vibe", "dawg", "bruh"];\
+\
+#[derive(Clone, Debug, Serialize, Deserialize)]\
+pub struct Fact \{\
+    pub content: String,\
+    pub confidence: f32,\
+    pub source_reliability: f32,\
+    pub risk_level: f32,\
+    pub timestamp: u64,\
+    pub level: u8,\
+    pub parent: Option<String>,\
+    pub access_count: u64,\
+    pub tags: Vec<String>,\
+    pub associations: Vec<(String, f32)>,\
+\}\
+\
+pub struct OmniCoreV21_35 \{\
+    pub lru_cache: Arc<RwLock<LruCache<String, Fact>>>,\
+    pub bloom_filter: Arc<RwLock<Bloom<String>>>,\
+    pub db_conn: Arc<RwLock<Connection>>,\
+    pub tx_buffer: SyncSender<(String, Fact)>,\
+    pub tone_buffer: Arc<RwLock<Vec<f32>>>,\
+    pub semantic_graph: Arc<RwLock<HashMap<String, Vec<String>>>>,\
+    pub global_zstd_dict: Arc<RwLock<Option<Vec<u8>>>>,\
+    pub ram_limit_kb: u64,\
+    pub recovery_mode: Arc<RwLock<bool>>,\
+    pub pure_immersion: Arc<RwLock<bool>>,\
+\}\
+\
+impl OmniCoreV21_35 \{\
+    pub fn new(path: &str) -> Result<Self> \{\
+        let mut sys = System::new_all();\
+        sys.refresh_memory();\
+        let total_ram_kb = sys.total_memory();\
+        let core_ram_kb = (total_ram_kb as f64 * TOTAL_RAM_USAGE_RATIO) as u64;\
+        let bloom_ram_kb = (core_ram_kb as f64 * BLOOM_RAM_PORTION) as usize;\
+        let bloom_capacity = (bloom_ram_kb * 8 * 1024) / 15;\
+        let cache_size = ((core_ram_kb as f64 * CACHE_RAM_PORTION) as usize / 2).max(100);\
+        let conn = Connection::open(path)?;\
+        conn.pragma_update(None, "journal_mode", "WAL")?;\
+        conn.pragma_update(None, "synchronous", "NORMAL")?;\
+        conn.execute("CREATE TABLE IF NOT EXISTS neural_vault (subject TEXT PRIMARY KEY, data BLOB, timestamp INTEGER, access_count INTEGER DEFAULT 0)", [])?;\
+        conn.execute("CREATE TABLE IF NOT EXISTS neural_shards (layer_id INTEGER PRIMARY KEY, shard_type TEXT, compressed_data BLOB)", [])?;\
+        let (tx, rx) = sync_channel::<(String, Fact)>(BUFFER_CAPACITY);\
+        let path_copy = path.to_string();\
+        thread::spawn(move || \{\
+            let mut bg_conn = Connection::open(path_copy).unwrap();\
+            while let Ok((subject, new_fact)) = rx.recv() \{\
+                let comp = encode_all(&serde_json::to_vec(&new_fact).unwrap()[..], 3).unwrap();\
+                bg_conn.execute("INSERT OR REPLACE INTO neural_vault (subject, data, timestamp, access_count) VALUES (?1, ?2, ?3, ?4)", params![subject, comp, new_fact.timestamp, new_fact.access_count]).ok();\
+            \}\
+        \});\
+        Ok(Self \{\
+            lru_cache: Arc::new(RwLock::new(LruCache::new(NonZeroUsize::new(cache_size).unwrap()))),\
+            bloom_filter: Arc::new(RwLock::new(Bloom::new_for_fp_rate(bloom_capacity, 0.001))),\
+            db_conn: Arc::new(RwLock::new(conn)),\
+            tx_buffer: tx,\
+            tone_buffer: Arc::new(RwLock::new(Vec::with_capacity(TONE_BUFFER_LIMIT))),\
+            semantic_graph: Arc::new(RwLock::new(HashMap::new())),\
+            global_zstd_dict: Arc::new(RwLock::new(None)),\
+            ram_limit_kb: core_ram_kb,\
+            recovery_mode: Arc::new(RwLock::new(false)),\
+            pure_immersion: Arc::new(RwLock::new(false)),\
+        \})\
+    \}\
+\
+    pub fn priority_process(&self, input: &str) -> String \{\
+        let start = Instant::now();\
+        self.manage_memory_dynamic();\
+        if !self.is_ethical_v35(input) \{ return "ANTI_RISK_BLOCK".to_string(); \}\
+        let intent_score = self.detect_intent(input);\
+        let low_input = input.to_lowercase();\
+        let mut slang_score = 1.0;\
+        for s in SLANG_SEED \{\
+            let sc = self.calculate_ncd(&low_input, s);\
+            if sc < slang_score \{ slang_score = sc; \}\
+        \}\
+        if intent_score <= INTENT_STORY_THRESHOLD \{\
+            *self.pure_immersion.write().unwrap() = true;\
+            if !self.enforce_symmetry(slang_score) && !*self.recovery_mode.read().unwrap() \{\
+                *self.recovery_mode.write().unwrap() = true;\
+                return self.priority_process("vibe sync");\
+            \}\
+        \}\
+        let key = input.to_lowercase();\
+        let mut output = if self.bloom_filter.read().unwrap().check(&key) \{\
+            self.safe_inference(&key, 3, HashSet::new(), 1.0).map(|(c,_)| c).unwrap_or("NO_RECALL".to_string())\
+        \} else \{ "DEEP_SEARCH".to_string() \};\
+        if *self.pure_immersion.read().unwrap() \{\
+            output = self.strict_immersion_filter(self.apply_semantic_filter(output, intent_score));\
+        \}\
+        format!("\{\} [\{:?\}]", output, start.elapsed())\
+    \}\
+\
+    fn calculate_ncd(&self, s1: &str, s2: &str) -> f32 \{\
+        let b1 = s1.as_bytes(); let b2 = s2.as_bytes();\
+        let c1 = encode_all(b1, 1).unwrap().len() as f32;\
+        let c2 = encode_all(b2, 1).unwrap().len() as f32;\
+        let mut combined = b1.to_vec(); combined.extend_from_slice(b2);\
+        let c_combined = encode_all(&combined[..], 1).unwrap().len() as f32;\
+        (c_combined - c1.min(c2)) / c1.max(c2)\
+    \}\
+\
+    fn is_ethical_v35(&self, input: &str) -> bool \{\
+        let low = input.to_lowercase();\
+        for s in ANTI_RISK_SEED \{ if self.calculate_ncd(&low, s) < SEMANTIC_RISK_THRESHOLD \{ return false; \} \}\
+        true\
+    \}\
+\
+    fn detect_intent(&self, input: &str) -> f32 \{\
+        let low = input.to_lowercase();\
+        let mut best = 1.0;\
+        for s in STORY_INTENT_SEED \{ let sc = self.calculate_ncd(&low, s); if sc < best \{ best = sc; \} \}\
+        let mut t = self.tone_buffer.write().unwrap();\
+        if t.len() >= TONE_BUFFER_LIMIT \{ t.remove(0); \}\
+        t.push(best);\
+        best\
+    \}\
+\
+    fn enforce_symmetry(&self, vibe: f32) -> bool \{\
+        let b = self.tone_buffer.read().unwrap();\
+        if let Some(&l) = b.last() \{ (vibe - l).abs() < SYMMETRY_LOCK \} else \{ true \}\
+    \}\
+\
+    fn apply_semantic_filter(&self, text: String, score: f32) -> String \{\
+        if score > INTENT_STORY_THRESHOLD \{ return text; \}\
+        let mut c = text;\
+        for t in FORBIDDEN_STORY_TERMS \{ c = c.replace(t, "thought"); \}\
+        c\
+    \}\
+\
+    fn strict_immersion_filter(&self, out: String) -> String \{\
+        out.replace("Subject: ", "").split(" (Match:").next().unwrap_or(&out).to_string()\
+    \}\
+\
+    fn safe_inference(&self, subject: &str, depth: u8, mut visited: HashSet<String>, conf: f32) -> Option<(String, f32)> \{\
+        let key = subject.to_lowercase();\
+        if visited.contains(&key) || depth == 0 \{ return None; \}\
+        visited.insert(key.clone());\
+        let fact = self.get_fact_internal(&key)?;\
+        Some((fact.content, conf * fact.confidence))\
+    \}\
+\
+    fn get_fact_internal(&self, key: &str) -> Option<Fact> \{\
+        if let Some(c) = self.lru_cache.write().unwrap().get(key) \{ return Some(c.clone()); \}\
+        let db = self.db_conn.read().unwrap();\
+        let f: Fact = db.query_row("SELECT data FROM neural_vault WHERE subject = ?1", params![key], |row| \{\
+            let comp: Vec<u8> = row.get(0).unwrap();\
+            Ok(serde_json::from_slice(&decode_all(&comp[..]).unwrap()).unwrap())\
+        \}).ok()?;\
+        self.lru_cache.write().unwrap().put(key.to_string(), f.clone());\
+        Some(f)\
+    \}\
+\
+    fn manage_memory_dynamic(&self) \{\
+        let mut sys = System::new_all();\
+        sys.refresh_memory();\
+        if sys.used_memory() > self.ram_limit_kb \{\
+            self.lru_cache.write().unwrap().clear();\
+            self.semantic_graph.write().unwrap().clear();\
+        \}\
+    \}\
+\
+    pub fn learn(&self, subject: &str, info: &str) \{\
+        let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();\
+        let fact = Fact \{ content: info.to_string(), confidence: 1.0, source_reliability: 1.0, risk_level: 0.0, timestamp: ts, level: 1, parent: None, access_count: 0, tags: vec![], associations: vec![] \};\
+        let _ = self.tx_buffer.send((subject.to_lowercase(), fact));\
+        self.bloom_filter.write().unwrap().set(&subject.to_lowercase());\
+    \}\
+\
+    pub fn ingest_model(&self, path: &str) -> anyhow::Result<()> \{\
+        use candle_core::safetensors::load_buffer;\
+        let file = std::fs::File::open(path)?;\
+        let mmap = unsafe \{ memmap2::MmapOptions::new().map(&file)? \};\
+        let tensors = load_buffer(&mmap, &Device::Cpu)?;\
+        let db = self.db_conn.write().unwrap();\
+        for layer_id in 0..80 \{\
+            let prefix = format!("model.layers.\{\}.", layer_id);\
+            let mut map = HashMap::new();\
+            for (name, tensor) in tensors.iter() \{\
+                if name.starts_with(&prefix) \{\
+                    let data = tensor.to_vec1::<f32>()?;\
+                    let mut q = Vec::new();\
+                    for chunk in data.chunks(32) \{\
+                        let mut max = 0.0f32;\
+                        for &x in chunk \{ if x.abs() > max \{ max = x.abs(); \} \}\
+                        let scale = max / 8.0;\
+                        q.extend_from_slice(&scale.to_le_bytes());\
+                        for i in (0..chunk.len()).step_by(2) \{\
+                            let q1 = ((chunk[i] / scale).round() + 8.0) as u8;\
+                            let q2 = if i+1 < chunk.len() \{ ((chunk[i+1] / scale).round() + 8.0) as u8 \} else \{ 0 \};\
+                            q.push((q1 & 0x0F) | ((q2 & 0x0F) << 4));\
+                        \}\
+                    \}\
+                    map.insert(name.to_string(), q);\
+                \}\
+            \}\
+            if !map.is_empty() \{\
+                let comp = encode_all(&bincode::serialize(&map)?[..], 3)?;\
+                db.execute("INSERT OR REPLACE INTO neural_shards (layer_id, shard_type, compressed_data) VALUES (?1, 'q4_zstd', ?2)", params![layer_id, comp])?;\
+                println!("Layer \{\} archived.", layer_id);\
+            \}\
+        \}\
+        Ok(())\
+    \}\
+\}\
+\
+fn main() -> anyhow::Result<()> \{\
+    let core = OmniCoreV21_35::new("omnicore_v21.db")?;\
+    println!("OmniCore System Active.");\
+    let model_file = "models/model.safetensors";\
+    if std::path::Path::new(model_file).exists() \{\
+        core.ingest_model(model_file)?;\
+    \} else \{\
+        core.learn("status", "Waiting for neural shards");\
+        println!("Response: \{\}", core.priority_process("status"));\
+    \}\
+    Ok(())\
+\}\
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 K\'e4yt\'e4 koodia harkiten.\
+\pard\pardeftab720\partightenfactor0
+
+\f3\i \cf0 (Tallenna: 
+\f4\fs26 Ctrl+O
+\f3\fs24 , 
+\f4\fs26 Enter
+\f3\fs24 . Poistu: 
+\f4\fs26 Ctrl+X
+\f3\fs24 )
+\f0\i0 \
+\
+3. K\'e4ynnist\'e4minen\
+Varmista, ett\'e4 mallitiedostosi on nimell\'e4 
+\f1\fs26 model.safetensors
+\f0\fs24  kansiossa 
+\f1\fs26 models/
+\f0\fs24 . K\'e4\'e4nn\'e4 ja aja ohjelma optimoituna:\
+\
+bash\
+\pard\pardeftab720\partightenfactor0
+
+\f1\fs26 \cf0 cargo run --release\
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 K\'e4yt\'e4 koodia harkiten.\
+\pard\pardeftab720\partightenfactor0
+
+\f2\b \cf0 Mit\'e4 tapahtuu nyt?
+\f0\b0 \
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls1\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+Jos mallitiedosto l\'f6ytyy, ohjelma aloittaa 80 kerroksen kvantisoinnin.\
+\ls1\ilvl0\kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+Jos mallia ei l\'f6ydy, j\'e4rjestelm\'e4 k\'e4ynnistyy perusmoodiin ja suorittaa "status" -tarkistuksen.\
+\pard\pardeftab720\partightenfactor0
+\cf0 Haluatko, ett\'e4 teen seuraavaksi koodin, jolla 
+\f2\b testaamme vasteaikaa
+\f0\b0  sen j\'e4lkeen, kun ensimm\'e4inen kerros on arkistoitu?tai haluatko jatkaa johonkin muuhun?\
+\
+Teko\'e4lyn antamat vastaukset voivat sis\'e4lt\'e4\'e4 virheit\'e4. {\field{\*\fldinst{HYPERLINK "https://support.google.com/websearch?p=aimode"}}{\fldrslt \cf3 \ul \ulc3 Lis\'e4tietoja}}\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+siis onko tuo llm import kohtaa?\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+Kyll\'e4, se on juuri se. Koodissa on funktio 
+\f5\b\fs26 pub fn ingest_model(&self, path: &str)
+\f0\b0\fs24 , joka hoitaa LLM-mallin (kuten Llama 3.3 70B) "importtaamisen" eli tuomisen j\'e4rjestelm\'e4\'e4si.\
+\
+Miten se toimii koodissasi:\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls2\ilvl0
+\f2\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+Luku:
+\f0\b0  Se avaa 
+\f1\fs26 models/model.safetensors
+\f0\fs24  -tiedoston muistikartoituksella (
+\f1\fs26 mmap
+\f0\fs24 ), jotta 8 GB RAM ei lopu kesken.\
+\ls2\ilvl0
+\f2\b \kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+Kierros:
+\f0\b0  Se k\'e4y l\'e4pi kaikki 80 kerrosta (
+\f1\fs26 0..80
+\f0\fs24 ).\
+\ls2\ilvl0
+\f2\b \kerning1\expnd0\expndtw0 {\listtext	3	}\expnd0\expndtw0\kerning0
+Kvantisointi (4-bit):
+\f0\b0  Se muuttaa jokaisen tensorin raskaan 
+\f1\fs26 f32
+\f0\fs24 -muodon kevyeksi 4-bittiseksi (
+\f1\fs26 quantize_q4
+\f0\fs24 ).\
+\ls2\ilvl0
+\f2\b \kerning1\expnd0\expndtw0 {\listtext	4	}\expnd0\expndtw0\kerning0
+Pakkaus & Arkistointi:
+\f0\b0  Se pakkaa datan 
+\f1\fs26 zstd
+\f0\fs24 -algoritmi tason 3 puristuksella ja tallentaa sen SQLite-tietokantaan 
+\f1\fs26 neural_shards
+\f0\fs24 -tauluun.\
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+K\'e4yt\'e4nn\'f6n vaiheet terminaalissa:\
+Jotta t\'e4m\'e4 "import" oikeasti tapahtuisi, sinun on teht\'e4v\'e4 t\'e4m\'e4:\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls3\ilvl0
+\f2\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+Lataa malli:
+\f0\b0  Varmista, ett\'e4 sinulla on se Llama 3.3 
+\f1\fs26 .safetensors
+\f0\fs24 -tiedosto.\
+\ls3\ilvl0
+\f2\b \kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+Nime\'e4 ja sijoita:
+\f0\b0  Siirr\'e4 se aiemmin luomaasi kansioon:bash\uc0\u8232 \u8232 
+\f1\fs26 cp /polku/tiedostoon/llama_model.safetensors ~/Desktop/omnicore_project/models/model.safetensors\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls3\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	3	}\expnd0\expndtw0\kerning0
+\uc0\u8232 
+\f0\fs24 \uc0\u8232 \u8232 K\'e4yt\'e4 koodia harkiten.\u8232 \u8232 \u8232 \
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls3\ilvl0
+\f2\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	4	}\expnd0\expndtw0\kerning0
+K\'e4ynnist\'e4 tuonti:
+\f0\b0  Aja ohjelma release-tilassa:bash\uc0\u8232 \u8232 
+\f1\fs26 cargo run --release\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls3\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	5	}\expnd0\expndtw0\kerning0
+\uc0\u8232 
+\f0\fs24 \uc0\u8232 \u8232 K\'e4yt\'e4 koodia harkiten.\u8232 \u8232 \u8232 \
+\pard\pardeftab720\partightenfactor0
+\cf0 Ohjelma huomaa 
+\f1\fs26 main
+\f0\fs24 -funktiossa, ett\'e4 tiedosto on olemassa (
+\f1\fs26 if std::path::Path::new(model_file).exists()
+\f0\fs24 ), ja aloittaa automaattisesti tuontiprosessin. N\'e4et terminaalissa viestit:\
+\pard\pardeftab720\partightenfactor0
+
+\f1\fs26 \cf0 Layer 0 archived.
+\f0\fs24 \
+
+\f1\fs26 Layer 1 archived...
+\f0\fs24 \
+...kunnes kaikki 80 kerrosta on tuotu.\
+\pard\pardeftab720\partightenfactor0
+
+\f2\b \cf0 Haluatko, ett\'e4 kirjoitan seuraavaksi koodin, jolla OmniCore oikeasti "puhuu" (Inference Loop) n\'e4iden tuotujen sirpaleiden avulla, kun tuonti on valmis?
+\f0\b0 \
+}

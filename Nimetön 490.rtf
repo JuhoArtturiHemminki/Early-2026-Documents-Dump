@@ -1,0 +1,44 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\froman\fcharset0 Times-Roman;}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;}
+{\*\listtable{\list\listtemplateid1\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid1\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid1}
+{\list\listtemplateid2\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid101\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid2}
+{\list\listtemplateid3\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat2\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid201\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid3}
+{\list\listtemplateid4\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid301\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid4}
+{\list\listtemplateid5\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat3\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid401\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid5}}
+{\*\listoverridetable{\listoverride\listid1\listoverridecount0\ls1}{\listoverride\listid2\listoverridecount0\ls2}{\listoverride\listid3\listoverridecount0\ls3}{\listoverride\listid4\listoverridecount0\ls4}{\listoverride\listid5\listoverridecount0\ls5}}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab720
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 \expnd0\expndtw0\kerning0
+Subject: Technical Rebuttal: Addressing Privilege Requirements and Threat Model Integrity (TDX/SGX Context)\
+To the Intel PSIRT Engineering Team,\
+I am providing this additional technical clarification to preemptively address any assessment regarding the "Privilege Required" (PR) metric in the CVSS scoring of my recent disclosures (SVRRS, MTSRL, SKHER, and GHOST-READ).\
+Any attempt to downgrade the severity based on the requirement of "Local Admin" or "Ring-0" access fundamentally misinterprets the threat model of modern Confidential Computing and Intel Trust Domain Extensions (TDX).\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls1\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+The "Untrusted Host" Threat Model in TDX/SGX\uc0\u8232 The primary value proposition of Intel TDX and SGX is to provide hardware-enforced isolation from a potentially compromised or malicious Host/Hypervisor. In these environments, the attacker is by definition a privileged entity (Ring-0 or VMM-level).\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls2\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+The Breach: My Proof of Concept (PoC) demonstrates that even with full administrative control over the host, a malicious entity should NOT be able to sample plaintext residues from the protected Trust Domain (TD) or Enclave.\
+\ls2\ilvl0\kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+The Impact: Since GHOST-READ and MTSRL allow a privileged host to recover plaintext data from a guest TD via speculative LLC tag-contention and Tile-SRAM residues, the isolation boundary is effectively nullified. Therefore, the "Privilege Required" metric should be treated as None (PR:N) or Low (PR:L) relative to the victim's security context.\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls3\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+Speculative Bypass of MKTME and Memory Integrity\uc0\u8232 The vulnerability lies in the fact that the hardware forwards decrypted plaintext data to the execution ports (Port-Level Residue) or the Line Fill Buffers BEFORE the hardware-level Domain-ID (HKID) or Access Control checks are architecturally retired.\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls4\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+The Argument: If the hardware fails to enforce isolation at the microarchitectural level, the OS-level privilege model becomes irrelevant. My PoC confirms that the Multi-Key Total Memory Encryption (MKTME) engine is bypassed because the leakage occurs post-decryption within the shared physical core resources.\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls5\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	3	}\expnd0\expndtw0\kerning0
+Cross-Tenant Leakage in Cloud Environments\uc0\u8232 In multi-tenant cloud environments (CaaS/PaaS), an attacker may occupy a sibling SMT thread without any elevated privileges on the victim's VM. SVRRS and MTSRL enable cross-thread leakage where the attacker needs only to execute legal AVX-512 or AMX instructions to sample the "hot" residues of a previous or concurrent occupant. This constitutes a Scope Change (S:C) and a High Confidentiality Impact (C:H).\
+\pard\pardeftab720\partightenfactor0
+\cf0 Conclusion:\
+The severity of these disclosures must be evaluated based on the breach of the Trusted Execution Environment (TEE), not the privileges of the attacker on the underlying host. Any architectural flaw that allows an untrusted infrastructure provider to peek into a secure workload is a Critical (CVSS 9.1+) vulnerability.\
+I request that the evaluation team specifically reviews the HKID-validation race condition during LLC tag-matches, as this confirms the architectural failure to maintain domain isolation regardless of host privilege levels.\
+Best regards,\
+[Oma Nimesi / Nimimerkkisi]\
+[Oma PGP-sormenj\'e4lkesi]\
+}

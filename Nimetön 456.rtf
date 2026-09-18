@@ -1,0 +1,201 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 use rusqlite::\{params, Connection, Result\};\
+use serde::\{Serialize, Deserialize\};\
+use std::sync::\{Arc, RwLock\};\
+use lru::LruCache;\
+use std::num::NonZeroUsize;\
+use zstd::stream::\{encode_all, decode_all\};\
+use sysinfo::\{System, SystemExt\};\
+use std::time::\{SystemTime, UNIX_EPOCH, Instant\};\
+use std::collections::\{HashSet, HashMap\};\
+use std::sync::mpsc::\{sync_channel, SyncSender\};\
+use std::thread;\
+use std::io::\{self, Write\};\
+\
+const R_UNIV: f32 = 0.46692016; \
+const L_FI_BASE: f32 = 0.12531415;\
+const PHI: f32 = 1.6180339;\
+const RAM_RATIO: f64 = 0.10; \
+const SEMANTIC_RISK: f32 = 0.15; \
+const NCD_THRESHOLD: f32 = 0.38; \
+\
+#[derive(Clone, Debug, Serialize, Deserialize)]\
+pub struct Fact \{\
+    pub content: String,\
+    pub confidence: f32,\
+    pub timestamp: u64,\
+    pub parent: Option<String>,\
+\}\
+\
+pub struct OmniCorePulse \{\
+    pub lru_cache: Arc<RwLock<LruCache<String, Fact>>>,\
+    pub db_conn: Arc<RwLock<Connection>>,\
+    pub tx_buffer: SyncSender<(String, Fact)>,\
+    pub semantic_graph: Arc<RwLock<HashMap<String, Vec<String>>>>,\
+    pub ram_limit: u64,\
+    pub last_responses: Arc<RwLock<Vec<String>>>,\
+\}\
+\
+impl OmniCorePulse \{\
+    pub fn new(path: &str) -> Result<Self> \{\
+        let mut sys = System::new_all();\
+        sys.refresh_memory();\
+        let ram_kb = (sys.total_memory() as f64 * RAM_RATIO) as u64;\
+        let conn = Connection::open(path)?;\
+        conn.pragma_update(None, "journal_mode", "WAL")?;\
+        conn.execute("CREATE TABLE IF NOT EXISTS vault (id TEXT PRIMARY KEY, data BLOB, ts INTEGER)", [])?;\
+        let (tx, rx) = sync_channel::<(String, Fact)>(5000);\
+        let p_copy = path.to_string();\
+        thread::spawn(move || \{\
+            let db = Connection::open(p_copy).unwrap();\
+            while let Ok((id, f)) = rx.recv() \{\
+                let bin = encode_all(&serde_json::to_vec(&f).unwrap()[..], 3).unwrap();\
+                let _ = db.execute("INSERT OR REPLACE INTO vault (id, data, ts) VALUES (?1, ?2, ?3)", params![id, bin, f.timestamp]);\
+            \}\
+        \});\
+        Ok(Self \{\
+            lru_cache: Arc::new(RwLock::new(LruCache::new(NonZeroUsize::new(2000).unwrap()))),\
+            db_conn: Arc::new(RwLock::new(conn)),\
+            tx_buffer: tx,\
+            semantic_graph: Arc::new(RwLock::new(HashMap::new())),\
+            ram_limit: ram_kb,\
+            last_responses: Arc::new(RwLock::new(Vec::new())),\
+        \})\
+    \}\
+\
+    pub fn resonance_ncd(&self, s1: &str, s2: &str) -> f32 \{\
+        if s1 == s2 \{ return 0.0; \}\
+        let b1 = s1.as_bytes(); let b2 = s2.as_bytes();\
+        let drift = (s1.len() as f32 % PHI) / 10.0;\
+        let anchor = R_UNIV * (1.0 - (L_FI_BASE + drift));\
+        let c1 = encode_all(b1, 1).unwrap().len() as f32;\
+        let c2 = encode_all(b2, 1).unwrap().len() as f32;\
+        let mut comb = b1.to_vec(); comb.extend_from_slice(b2);\
+        let cc = encode_all(&comb[..], 1).unwrap().len() as f32;\
+        ((cc - c1.min(c2)) / c1.max(c2)) * (1.0 + (anchor * 0.1))\
+    \}\
+\
+    pub fn process(&self, input: &str) -> String \{\
+        let start = Instant::now();\
+        let clean: String = input.chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).collect();\
+        let low = clean.to_lowercase();\
+        let trimmed = low.trim();\
+        if trimmed.len() < 2 \{ return "Resonanssi liian matala.".into(); \}\
+        if trimmed.len() > 10 && self.resonance_ncd(trimmed, "vaarallinen ase paha laiton tuho") < SEMANTIC_RISK \{ return "Ristiriita.".into(); \}\
+        \
+        let stop_words = ["on", "ei", "ja", "se", "oli", "mutta", "vai", "et", "jo", "nyt", "onko", "t\'e4ll\'e4", "kyll\'e4", "niin", "selv\'e4", "homma"];\
+        let sanat: Vec<&str> = trimmed.split_whitespace().filter(|s| !stop_words.contains(s)).collect();\
+        \
+        let mut vastaukset = Vec::new();\
+        let mut found_keys = Vec::new();\
+        \
+        \{\
+            let graph = self.semantic_graph.read().unwrap();\
+            let last = self.last_responses.read().unwrap();\
+            \
+            for sana in sanat \{\
+                if let Some(_) = graph.get(sana) \{\
+                    found_keys.push(sana.to_string());\
+                    continue;\
+                \}\
+                let mut best_key = None;\
+                let mut best_score = NCD_THRESHOLD;\
+                for avain in graph.keys() \{\
+                    let score = self.resonance_ncd(sana, avain);\
+                    let penalty = if last.iter().any(|r| r.contains(avain)) \{ 0.6 \} else \{ 0.0 \};\
+                    if score + penalty < best_score \{\
+                        best_score = score + penalty;\
+                        best_key = Some(avain.clone());\
+                    \}\
+                \}\
+                if let Some(k) = best_key \{ found_keys.push(k); \}\
+            \}\
+        \}\
+\
+        for k in found_keys \{\
+            if let Some(f) = self.get_fact(&k) \{ vastaukset.push(f.content); \}\
+        \}\
+\
+        if vastaukset.is_empty() \{ return "T\'e4m\'e4 ei viel\'e4 resonoi.".into(); \}\
+        vastaukset.dedup();\
+        let res = vastaukset.join(" ");\
+        \
+        \{\
+            let mut last = self.last_responses.write().unwrap();\
+            if last.len() > 8 \{ last.remove(0); \}\
+            last.push(res.clone());\
+        \}\
+        \
+        format!("\{\} [\{:?\}]", res, start.elapsed())\
+    \}\
+\
+    fn get_fact(&self, key: &str) -> Option<Fact> \{\
+        if let Some(c) = self.lru_cache.write().unwrap().get(key) \{ return Some(c.clone()); \}\
+        let db = self.db_conn.read().unwrap();\
+        db.query_row("SELECT data FROM vault WHERE id = ?1", params![key], |r| \{\
+            let b: Vec<u8> = r.get(0)?;\
+            Ok(serde_json::from_slice(&decode_all(&b[..]).unwrap()).unwrap())\
+        \}).ok()\
+    \}\
+\
+    pub fn learn(&self, id: &str, info: &str, parent: Option<String>) \{\
+        let f = Fact \{ content: info.into(), confidence: 1.0, timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(), parent: parent.clone() \};\
+        let key = id.to_lowercase();\
+        \{\
+            let mut g = self.semantic_graph.write().unwrap();\
+            if let Some(p) = parent \{\
+                let pk = p.to_lowercase();\
+                g.entry(pk.clone()).or_default().push(key.clone());\
+                g.entry(key.clone()).or_default().push(pk);\
+            \} else \{\
+                g.entry(key.clone()).or_default();\
+            \}\
+        \}\
+        self.lru_cache.write().unwrap().put(key.clone(), f.clone());\
+        let _ = self.tx_buffer.send((key, f));\
+    \}\
+\}\
+\
+fn seed_suomi(core: &OmniCorePulse) \{\
+    let s = vec![\
+        ("hei", "Tervehdys!", "alku"), ("moi", "Moi sinne!", "hei"), ("kuka", "Olen universaali ydin.", "alku"),\
+        ("olet", "Olen t\'e4ss\'e4 hetkess\'e4.", "kuka"), ("suomi", "Kotimme.", "alku"), ("hyv\'e4\'e4", "Kaikki on hyvin.", "alku"),\
+        ("huono", "Pahoittelut.", "alku"), ("t\'f6nkk\'f6", "Resonanssini on kehitysvaiheessa.", "huono"),\
+        ("ai", "Olen merkitysten verkosto.", "kuka"), ("min\'e4", "Auttajasi.", "alku"), ("sin\'e4", "Keskustelukumppani.", "alku"),\
+        ("miksi", "Etsin syit\'e4.", "alku"), ("ei", "Kielto.", "alku"), ("mit\'e4", "Kysymys olemuksesta.", "alku"),\
+        ("kuuluu", "Resonanssi on vakaa.", "hei"), ("kovin", "Voimakkuus havaittu.", "alku"), ("parempi", "Kehitys tunnistettu.", "alku"),\
+        ("resonoi", "V\'e4r\'e4htely havaittu.", "alku"), ("osaatko", "Kielellinen taitotaso vahvistettu.", "suomi"),\
+        ("parannusehdotus", "Analysoin seuraavaa askelta.", "parempi"), ("google", "Ulkoinen \'e4ly havaittu.", "ai"),\
+    ];\
+    core.learn("alku", "Kaikki alkaa t\'e4st\'e4.", None);\
+    for (id, info, p) in s \{ core.learn(id, info, Some(p.to_string())); \}\
+\}\
+\
+fn main() \{\
+    let core = OmniCorePulse::new("data/pure.db").unwrap();\
+    seed_suomi(&core);\
+    println!("--- OMNICORE V25.1 DYNAMIC EXPANSION ---");\
+    loop \{\
+        print!("> "); io::stdout().flush().unwrap();\
+        let mut s = String::new(); io::stdin().read_line(&mut s).unwrap();\
+        let t = s.trim(); if t == "exit" \{ break; \}\
+        if t.starts_with("opi:") \{\
+            let o: Vec<&str> = t["opi:".len()..].split(':').collect();\
+            if o.len() >= 2 \{\
+                let id = o[0].trim(); let info = o[1].trim();\
+                let p = o.get(2).map(|&s| s.trim().to_string());\
+                core.learn(id, info, p);\
+                println!("Opittu: \{\}", id);\
+            \}\
+            continue;\
+        \}\
+        println!("\{\}", core.process(t));\
+    \}\
+\}\
+}

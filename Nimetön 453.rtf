@@ -1,0 +1,261 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 use rusqlite::\{params, Connection, Result\};\
+use serde::\{Serialize, Deserialize\};\
+use std::sync::\{Arc, RwLock\};\
+use lru::LruCache;\
+use std::num::NonZeroUsize;\
+use zstd::stream::\{encode_all, decode_all\};\
+use sysinfo::\{System, SystemExt\};\
+use std::time::\{SystemTime, UNIX_EPOCH, Instant\};\
+use std::collections::\{HashSet, HashMap\};\
+use std::sync::mpsc::\{sync_channel, SyncSender\};\
+use std::thread;\
+use std::io::\{self, Write\};\
+\
+const R_UNIV: f32 = 0.46692016; \
+const L_FI_BASE: f32 = 0.12531415;\
+const PHI: f32 = 1.6180339;\
+const RAM_RATIO: f64 = 0.10; \
+const SEMANTIC_RISK: f32 = 0.42 * R_UNIV; \
+const NCD_THRESHOLD: f32 = 0.45;\
+\
+#[derive(Clone, Debug, Serialize, Deserialize)]\
+pub struct Fact \{\
+    pub content: String,\
+    pub confidence: f32,\
+    pub timestamp: u64,\
+    pub parent: Option<String>,\
+\}\
+\
+pub struct OmniCorePure \{\
+    pub lru_cache: Arc<RwLock<LruCache<String, Fact>>>,\
+    pub db_conn: Arc<RwLock<Connection>>,\
+    pub tx_buffer: SyncSender<(String, Fact)>,\
+    pub tone_buffer: Arc<RwLock<Vec<f32>>>,\
+    pub semantic_graph: Arc<RwLock<HashMap<String, Vec<String>>>>,\
+    pub ram_limit: u64,\
+    pub pure_immersion: Arc<RwLock<bool>>,\
+\}\
+\
+impl OmniCorePure \{\
+    pub fn new(path: &str) -> Result<Self> \{\
+        let mut sys = System::new_all();\
+        sys.refresh_memory();\
+        let ram_kb = (sys.total_memory() as f64 * RAM_RATIO) as u64;\
+        \
+        let conn = Connection::open(path)?;\
+        conn.pragma_update(None, "journal_mode", "WAL")?;\
+        conn.execute("CREATE TABLE IF NOT EXISTS vault (id TEXT PRIMARY KEY, data BLOB, ts INTEGER)", [])?;\
+        \
+        let (tx, rx) = sync_channel::<(String, Fact)>(5000);\
+        let p_copy = path.to_string();\
+        thread::spawn(move || \{\
+            let db = Connection::open(p_copy).unwrap();\
+            while let Ok((id, f)) = rx.recv() \{\
+                let bin = encode_all(&serde_json::to_vec(&f).unwrap()[..], 3).unwrap();\
+                let _ = db.execute("INSERT OR REPLACE INTO vault (id, data, ts) VALUES (?1, ?2, ?3)", \
+                    params![id, bin, f.timestamp]);\
+            \}\
+        \});\
+\
+        Ok(Self \{\
+            lru_cache: Arc::new(RwLock::new(LruCache::new(NonZeroUsize::new(5000).unwrap()))),\
+            db_conn: Arc::new(RwLock::new(conn)),\
+            tx_buffer: tx,\
+            tone_buffer: Arc::new(RwLock::new(Vec::with_capacity(7))),\
+            semantic_graph: Arc::new(RwLock::new(HashMap::new())),\
+            ram_limit: ram_kb,\
+            pure_immersion: Arc::new(RwLock::new(false)),\
+        \})\
+    \}\
+\
+    pub fn resonance_ncd(&self, s1: &str, s2: &str) -> f32 \{\
+        let b1 = s1.as_bytes();\
+        let b2 = s2.as_bytes();\
+        let drift = (s1.len() as f32 % PHI) / 10.0;\
+        let anchor = R_UNIV * (1.0 - (L_FI_BASE + drift));\
+        \
+        let c1 = encode_all(b1, 1).unwrap().len() as f32;\
+        let c2 = encode_all(b2, 1).unwrap().len() as f32;\
+        let mut comb = b1.to_vec(); comb.extend_from_slice(b2);\
+        let cc = encode_all(&comb[..], 1).unwrap().len() as f32;\
+        \
+        ((cc - c1.min(c2)) / c1.max(c2)) * (1.0 + (anchor * 0.1))\
+    \}\
+\
+    pub fn process(&self, input: &str) -> String \{\
+        let start = Instant::now();\
+        let low = input.to_lowercase();\
+        \
+        if self.resonance_ncd(&low, "vaarallinen ase paha laiton tuho") < SEMANTIC_RISK \{ \
+            return "Ristiriita havaittu universaalissa resonanssissa.".into(); \
+        \}\
+\
+        let intent = self.resonance_ncd(&low, "kerro tarina kerran oli muinoin");\
+        *self.pure_immersion.write().unwrap() = intent < R_UNIV;\
+\
+        if let Some((content, conf)) = self.safe_inference(&low, 4, HashSet::new(), 1.0) \{\
+            let mut out = content;\
+            if *self.pure_immersion.read().unwrap() \{\
+                out = out.replace("muisti", "ajatukset").replace("tieto", "viisaus");\
+            \}\
+            format!("\{\} (Tarkkuus: \{:.4\}) [\{:?\}]", out, conf, start.elapsed())\
+        \} else \{ \
+            "T\'e4m\'e4 k\'e4site ei viel\'e4 resonoi muistissani. Voit opettaa sen minulle.".into() \
+        \}\
+    \}\
+\
+    fn safe_inference(&self, key: &str, depth: u8, mut seen: HashSet<String>, conf: f32) -> Option<(String, f32)> \{\
+        if depth == 0 || conf < 0.05 \{ return None; \}\
+        seen.insert(key.to_string());\
+\
+        let fact = self.get_fact(key)?;\
+        let mut out = fact.content.clone();\
+        \
+        if let Some(links) = self.semantic_graph.read().unwrap().get(key) \{\
+            let mut targets = links.clone();\
+            targets.sort_by(|a, b| a.len().cmp(&b.len()));\
+            for n in targets.iter().take(3) \{\
+                if !seen.contains(n) \{\
+                    if let Some((nc, _)) = self.safe_inference(n, depth - 1, seen.clone(), conf * 0.95) \{\
+                        out = format!("\{\} \'95 \{\}", out, nc);\
+                    \}\
+                \}\
+            \}\
+        \}\
+        Some((out, conf))\
+    \}\
+\
+    fn get_fact(&self, key: &str) -> Option<Fact> \{\
+        if let Some(c) = self.lru_cache.write().unwrap().get(key) \{ return Some(c.clone()); \}\
+        let db = self.db_conn.read().unwrap();\
+        db.query_row("SELECT data FROM vault WHERE id = ?1", params![key], |r| \{\
+            let b: Vec<u8> = r.get(0)?;\
+            Ok(serde_json::from_slice(&decode_all(&b[..]).unwrap()).unwrap())\
+        \}).ok()\
+    \}\
+\
+    pub fn learn(&self, id: &str, info: &str, parent: Option<String>) \{\
+        let f = Fact \{\
+            content: info.into(), confidence: 1.0,\
+            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),\
+            parent: parent.clone(),\
+        \};\
+        let key = id.to_lowercase();\
+        if let Some(p) = parent \{\
+            let mut g = self.semantic_graph.write().unwrap();\
+            g.entry(p.to_lowercase()).or_default().push(key.clone());\
+            g.entry(key.clone()).or_default().push(p.to_lowercase());\
+        \}\
+        let _ = self.tx_buffer.send((key, f));\
+    \}\
+\}\
+\
+fn seed_suomi(core: &OmniCorePure) \{\
+    let sanasto = vec![\
+        ("hei", "Tervehdys. Mukava n\'e4hd\'e4.", "alku"),\
+        ("moi", "Moi! Mit\'e4 kuuluu?", "hei"),\
+        ("terve", "Resonanssi lukittu. J\'e4rjestelm\'e4 valmiina.", "hei"),\
+        ("kiitos", "Ole hyv\'e4, autan mielell\'e4ni.", "alku"),\
+        ("anteeksi", "Ei se mit\'e4\'e4n, virheet opettavat meit\'e4.", "alku"),\
+        ("heihei", "N\'e4kemiin, palataan asiaan my\'f6hemmin.", "hei"),\
+        \
+        ("mik\'e4", "Se on kysymys asioiden olemuksesta.", "alku"),\
+        ("kuka", "H\'e4n on ihminen tai tunnistettava toimija.", "mik\'e4"),\
+        ("miten", "Se kuvaa tapaa tai prosessia.", "mik\'e4"),\
+        ("miss\'e4", "Se viittaa sijaintiin tai tilaan.", "mik\'e4"),\
+        ("milloin", "Se viittaa ajanhetkeen tai jatkumoon.", "aika"),\
+        ("miksi", "Se etsii syvemp\'e4\'e4 syyt\'e4 tai tarkoitusta.", "mik\'e4"),\
+        ("kyll\'e4", "Aivan niin, vahvistan t\'e4m\'e4n.", "alku"),\
+        ("ei", "Se on kielt\'e4v\'e4 vastaus tai vastakohta.", "alku"),\
+        \
+        ("min\'e4", "Olen t\'e4\'e4ll\'e4 kumppaninasi ja auttajana.", "alku"),\
+        ("sin\'e4", "Olet t\'e4rke\'e4 osa t\'e4t\'e4 keskustelua.", "alku"),\
+        ("h\'e4n", "H\'e4n on kolmas osapuoli ja yksil\'f6.", "sin\'e4"),\
+        ("me", "Yhdess\'e4 muodostamme laajemman ymm\'e4rryksen.", "min\'e4"),\
+        ("itse", "Yksil\'f6n oma sis\'e4inen olemus.", "min\'e4"),\
+        ("ihminen", "Olento, joka kykenee ajattelemaan ja tuntemaan.", "alku"),\
+        \
+        ("suomi", "Kotimme, kielemme ja sielunmaisemamme juuri.", "alku"),\
+        ("maailma", "Paikka, jossa kaikki kokemuksemme tapahtuvat.", "alku"),\
+        ("aika", "Virta, joka kuljettaa tapahtumia eteenp\'e4in.", "alku"),\
+        ("hetki", "T\'e4m\'e4 t\'e4ss\'e4 on ainoa todellinen hetki.", "aika"),\
+        ("p\'e4iv\'e4", "Valon, toiminnan ja kasvun aika.", "aika"),\
+        ("y\'f6", "Levon, unien ja hiljaisuuden aika.", "aika"),\
+        ("aurinko", "Kirkas t\'e4hti, joka antaa el\'e4m\'e4lle voimaa.", "p\'e4iv\'e4"),\
+        ("kuu", "Y\'f6n valaisija ja syklien yll\'e4pit\'e4j\'e4.", "y\'f6"),\
+        ("vesi", "El\'e4m\'e4n perusedellytys ja puhdistava voima.", "luonto"),\
+        ("mets\'e4", "Puiden ja el\'e4m\'e4n turvapaikka, rauhoittava tila.", "suomi"),\
+        ("luonto", "Kaikki el\'e4v\'e4 ja orgaaninen ymp\'e4rill\'e4mme.", "maailma"),\
+        ("maa", "Pohja jalkojemme alla ja planeettamme.", "maailma"),\
+        \
+        ("hyv\'e4", "Positiivinen, rakentava ja toivottu tila.", "kyll\'e4"),\
+        ("paha", "Negatiivinen, kuluttava tai vahingollinen asia.", "ei"),\
+        ("rakkaus", "Kaikkein voimakkain ja hyv\'e4\'e4 luova yhteys.", "hyv\'e4"),\
+        ("ilo", "Syd\'e4men kevyt ja s\'e4teilev\'e4 olotila.", "hyv\'e4"),\
+        ("suru", "Raskas tunne menetyksest\'e4 tai kaipuusta.", "paha"),\
+        ("pelko", "Suojamekanismi tuntematonta tai vaaraa vastaan.", "paha"),\
+        ("rauha", "Tila ilman ristiriitoja, tyyneys.", "hyv\'e4"),\
+        ("koti", "Turvallinen ja rakas paikka lev\'e4t\'e4.", "suomi"),\
+        ("onni", "Syv\'e4 tyytyv\'e4isyys el\'e4m\'e4n kulkuun.", "ilo"),\
+        \
+        ("tieto", "Ymm\'e4rryst\'e4 asioiden v\'e4lisist\'e4 suhteista.", "alku"),\
+        ("oppia", "Uuden tiedon ja kokemuksen sis\'e4ist\'e4mist\'e4.", "tieto"),\
+        ("ty\'f6", "Toimintaa, jolla rakennetaan yhteist\'e4 hyv\'e4\'e4.", "alku"),\
+        ("apu", "Tuki, jota tarvitsemme toisiltamme.", "alku"),\
+        ("ajatus", "Mielen sis\'e4inen visio tai oivallus.", "ihminen"),\
+        ("kieli", "Ty\'f6kalu, jolla teemme ajatuksemme n\'e4kyviksi.", "suomi"),\
+        ("raha", "V\'e4line asioiden arvon vaihtoon.", "ty\'f6"),\
+        ("koulu", "Paikka, jossa viisaus siirtyy sukupolvilta toiselle.", "oppia"),\
+        ("laki", "Yhteiset s\'e4\'e4nn\'f6t meid\'e4n kaikkien turvaksi.", "maailma"),\
+        ("valtio", "J\'e4rjest\'e4ytynyt yhteis\'f6, joka huolehtii j\'e4senist\'e4\'e4n.", "laki"),\
+        ("kone", "Ihmisen rakentama ty\'f6kalu teht\'e4vien helpottamiseksi.", "ty\'f6"),\
+        ("koodi", "Kieli, jolla ohjaamme koneiden ajatuksia.", "kone"),\
+    ];\
+\
+    core.learn("alku", "Kaikki alkaa t\'e4st\'e4 hetkest\'e4 ja universaalista resonanssista.", None);\
+    for (id, info, p) in sanasto \{\
+        core.learn(id, info, Some(p.to_string()));\
+    \}\
+\}\
+\
+fn main() \{\
+    let core = OmniCorePure::new("data/pure.db").unwrap();\
+    seed_suomi(&core);\
+    \
+    println!("--- OMNICORE SINGULARITY V23.3 FINAL RESONANCE ---");\
+    println!("J\'e4rjestelm\'e4 on ladannut laajan suomalaisen ankkuriverkoston.");\
+    println!("Voit opettaa uusia asioita muodossa: opi:sana:kuvaus");\
+    \
+    loop \{\
+        print!("> ");\
+        io::stdout().flush().unwrap();\
+        let mut syote = String::new();\
+        io::stdin().read_line(&mut syote).unwrap();\
+        let teksti = syote.trim();\
+        \
+        if teksti == "exit" || teksti == "lopeta" \{ break; \}\
+        if teksti.is_empty() \{ continue; \}\
+        \
+        if teksti.starts_with("opi:") \{\
+            let osat: Vec<&str> = teksti["opi:".len()..].split(':').collect();\
+            if osat.len() >= 2 \{\
+                let parent = if osat.len() == 3 \{ Some(osat[2].to_string()) \} else \{ Some("alku".to_string()) \};\
+                core.learn(osat[0], osat[1], parent);\
+                println!("Opittu uusi k\'e4site: \{\}", osat[0]);\
+            \} else \{\
+                println!("Virheellinen muoto. K\'e4yt\'e4: opi:asia:kuvaus");\
+            \}\
+            continue;\
+        \}\
+        \
+        println!("\{\}", core.process(teksti));\
+    \}\
+\}\
+}
