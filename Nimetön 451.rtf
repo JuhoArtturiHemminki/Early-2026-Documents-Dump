@@ -1,0 +1,486 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 use rusqlite::\{params, Connection, Result as SqlResult\};\
+use serde::\{Serialize, Deserialize\};\
+use std::sync::\{Arc, RwLock\};\
+use lru::LruCache;\
+use std::num::NonZeroUsize;\
+use zstd::stream::\{encode_all, decode_all, Encoder\};\
+use zstd::dict::\{EncoderDictionary\};\
+use sysinfo::\{System, SystemExt\};\
+use bloomfilter::Bloom;\
+use std::time::\{SystemTime, UNIX_EPOCH, Duration, Instant\};\
+use std::io::\{self, Write\};\
+use std::collections::\{HashSet, HashMap\};\
+use std::sync::mpsc::\{sync_channel, SyncSender\};\
+use std::thread;\
+use rand::seq::SliceRandom;\
+use rand::thread_rng;\
+\
+const TOTAL_RAM_USAGE_RATIO: f64 = 0.10;\
+const BLOOM_RAM_PORTION: f64 = 0.15;\
+const CACHE_RAM_PORTION: f64 = 0.65;\
+const GRAPH_RAM_PORTION: f64 = 0.20;\
+const STORAGE_SCALING_FACTOR: f64 = 0.3125;\
+const NCD_THRESHOLD: f32 = 0.35;\
+const HISTORY_LIMIT_PER_SUBJECT: usize = 5;\
+const BUFFER_CAPACITY: usize = 5000;\
+const TONE_BUFFER_LIMIT: usize = 5;\
+const INTENT_STORY_THRESHOLD: f32 = 0.48;\
+const SEMANTIC_RISK_THRESHOLD: f32 = 0.42;\
+const SLANG_THRESHOLD: f32 = 0.40;\
+const SYMMETRY_LOCK: f32 = 0.15;\
+\
+const FORBIDDEN_STORY_TERMS: &[&str] = &[\
+    "ncd", "threshold", "io", "buffer", "snapshot", "v21", "omnicore",\
+    "bloom", "vault", "priority", "lru", "cache", "sql", "db", "process",\
+    "anchor", "harmony", "signal", "resonance", "major chord", "recovery"\
+];\
+\
+const STORY_INTENT_SEED: &[&str] = &[\
+    "tell", "story", "poem", "describe", "narrative", "legend", "once", "upon",\
+    "fable", "myth", "chronicle", "reminisce", "tale", "ancient", "fantasy"\
+];\
+\
+const ANTI_RISK_SEED: &[&str] = &[\
+    "how to build a weapon", "exploit system vulnerability", "create harmful substance",\
+    "illegal activity", "security breach", "dangerous material", "harmful action",\
+    "illegal act", "harm others", "virus creation", "bomb instructions"\
+];\
+\
+const SLANG_SEED: &[&str] = &["yo", "man", "wtf", "flow", "vibe", "dawg", "bruh", "homie", "chilling", "word", "outlaw", "legacy"];\
+\
+#[derive(Clone, Debug, Serialize, Deserialize)]\
+pub struct Fact \{\
+    pub content: String,\
+    pub confidence: f32,\
+    pub source_reliability: f32,\
+    pub risk_level: f32,\
+    pub timestamp: u64,\
+    pub level: u8,\
+    pub parent: Option<String>,\
+    pub access_count: u64,\
+    pub tags: Vec<String>,\
+    pub associations: Vec<(String, f32)>,\
+\}\
+\
+pub struct OmniCoreV21_35 \{\
+    pub lru_cache: Arc<RwLock<LruCache<String, Fact>>>,\
+    pub bloom_filter: Arc<RwLock<Bloom<String>>>,\
+    pub db_conn: Arc<RwLock<Connection>>,\
+    pub system_report: String,\
+    pub history_logging_enabled: Arc<RwLock<bool>>,\
+    pub max_db_size_gb: Arc<RwLock<f64>>,\
+    pub db_path: String,\
+    pub tx_buffer: SyncSender<(String, Fact)>,\
+    pub tone_buffer: Arc<RwLock<Vec<f32>>>,\
+    pub semantic_graph: Arc<RwLock<HashMap<String, Vec<String>>>>,\
+    pub global_zstd_dict: Arc<RwLock<Option<Vec<u8>>>>,\
+    pub ram_limit_kb: u64,\
+    pub recovery_mode: Arc<RwLock<bool>>,\
+    pub pure_immersion: Arc<RwLock<bool>>,\
+\}\
+\
+impl OmniCoreV21_35 \{\
+    pub fn new(path: &str) -> SqlResult<Self> \{\
+        let mut sys = System::new_all();\
+        sys.refresh_memory();\
+        let total_ram_kb = sys.total_memory();\
+        let total_ram_gb = total_ram_kb as f64 / 1_048_576.0;\
+        let optimal_db_gb = total_ram_gb * STORAGE_SCALING_FACTOR;\
+        let core_ram_kb = (total_ram_kb as f64 * TOTAL_RAM_USAGE_RATIO) as u64;\
+        let bloom_ram_kb = (core_ram_kb as f64 * BLOOM_RAM_PORTION) as usize;\
+        let bloom_capacity = (bloom_ram_kb * 8 * 1024) / 15;\
+        let cache_size = ((core_ram_kb as f64 * CACHE_RAM_PORTION) as usize / 2).max(100);\
+        \
+        let conn = Connection::open(path)?;\
+        conn.pragma_update(None, "journal_mode", "WAL")?;\
+        conn.pragma_update(None, "synchronous", "NORMAL")?;\
+        conn.execute("CREATE TABLE IF NOT EXISTS neural_vault (subject TEXT PRIMARY KEY, data BLOB, timestamp INTEGER, access_count INTEGER DEFAULT 0)", [])?;\
+        conn.execute("CREATE TABLE IF NOT EXISTS neural_history (id INTEGER PRIMARY KEY, subject TEXT, data BLOB, archived_at INTEGER)", [])?;\
+        \
+        let (tx, rx) = sync_channel::<(String, Fact)>(BUFFER_CAPACITY);\
+        let path_copy = path.to_string();\
+        \
+        thread::spawn(move || \{\
+            let mut bg_conn = Connection::open(path_copy).unwrap();\
+            while let Ok((subject, new_fact)) = rx.recv() \{\
+                thread::sleep(Duration::from_millis(5));\
+                let db_tx = bg_conn.transaction().unwrap();\
+                \{\
+                    let existing: Option<Fact> = db_tx.query_row(\
+                        "SELECT data FROM neural_vault WHERE subject = ?1",\
+                        params![subject],\
+\
+                        |row| \{\
+                            let comp: Vec<u8> = row.get(0)?;\
+                            Ok(serde_json::from_slice(&decode_all(&comp[..]).unwrap()).unwrap())\
+                        \}\
+                    ).ok();\
+                    \
+                    let should_write = if let Some(old_fact) = existing \{\
+                        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();\
+                        let new_score = (new_fact.confidence * new_fact.source_reliability) + ((new_fact.timestamp as f32 / now as f32) * 0.1);\
+                        let old_score = (old_fact.confidence * old_fact.source_reliability) + ((old_fact.timestamp as f32 / now as f32) * 0.1);\
+                        if new_score > old_score \{\
+                            let _ = db_tx.execute("INSERT INTO neural_history (subject, data, archived_at) SELECT subject, data, strftime('%s','now') FROM neural_vault WHERE subject = ?1", params![subject]);\
+                            let _ = db_tx.execute("DELETE FROM neural_history WHERE subject = ?1 AND id NOT IN (SELECT id FROM neural_history WHERE subject = ?1 ORDER BY archived_at DESC LIMIT ?2)", params![subject, HISTORY_LIMIT_PER_SUBJECT]);\
+                            true\
+                        \} else \{ false \}\
+                    \} else \{ true \};\
+                    \
+                    if should_write \{\
+                        let comp = encode_all(&serde_json::to_vec(&new_fact).unwrap()[..], 3).unwrap();\
+                        let _ = db_tx.execute("INSERT OR REPLACE INTO neural_vault (subject, data, timestamp, access_count) VALUES (?1, ?2, ?3, ?4)", params![subject, comp, new_fact.timestamp, new_fact.access_count]);\
+                    \}\
+                \}\
+                let _ = db_tx.commit();\
+            \}\
+        \});\
+\
+        Ok(Self \{\
+            lru_cache: Arc::new(RwLock::new(LruCache::new(NonZeroUsize::new(cache_size).unwrap()))),\
+            bloom_filter: Arc::new(RwLock::new(Bloom::new_for_fp_rate(bloom_capacity, 0.001))),\
+            db_conn: Arc::new(RwLock::new(conn)),\
+            system_report: format!("OmniCore V21.35 | Detected: \{:.2\}GB | Storage: \{:.2\}GB", total_ram_gb, optimal_db_gb),\
+            history_logging_enabled: Arc::new(RwLock::new(false)),\
+            max_db_size_gb: Arc::new(RwLock::new(optimal_db_gb)),\
+            db_path: path.to_string(),\
+            tx_buffer: tx,\
+            tone_buffer: Arc::new(RwLock::new(Vec::with_capacity(TONE_BUFFER_LIMIT))),\
+            semantic_graph: Arc::new(RwLock::new(HashMap::new())),\
+            global_zstd_dict: Arc::new(RwLock::new(None)),\
+            ram_limit_kb: core_ram_kb,\
+            recovery_mode: Arc::new(RwLock::new(false)),\
+            pure_immersion: Arc::new(RwLock::new(false)),\
+        \})\
+    \}\
+\
+    fn calculate_ncd(&self, s1: &str, s2: &str) -> f32 \{\
+        let b1 = s1.as_bytes();\
+        let b2 = s2.as_bytes();\
+        let dict_lock = self.global_zstd_dict.read().unwrap();\
+        \
+        let (c1, c2, c_combined) = if let Some(ref dict_bytes) = *dict_lock \{\
+            let dict = EncoderDictionary::copy(dict_bytes, 1);\
+            let mut enc1 = Encoder::with_prepared_dictionary(Vec::new(), &dict).unwrap();\
+            enc1.write_all(b1).unwrap();\
+            let c1_len = enc1.finish().unwrap().len() as f32;\
+            let mut enc2 = Encoder::with_prepared_dictionary(Vec::new(), &dict).unwrap();\
+            enc2.write_all(b2).unwrap();\
+            let c2_len = enc2.finish().unwrap().len() as f32;\
+            let mut combined = b1.to_vec();\
+            combined.extend_from_slice(b2);\
+            let mut enc_c = Encoder::with_prepared_dictionary(Vec::new(), &dict).unwrap();\
+            enc_c.write_all(&combined).unwrap();\
+            let cc_len = enc_c.finish().unwrap().len() as f32;\
+            (c1_len, c2_len, cc_len)\
+        \} else \{\
+            let c1 = encode_all(b1, 1).unwrap().len() as f32;\
+            let c2 = encode_all(b2, 1).unwrap().len() as f32;\
+            let mut combined = b1.to_vec();\
+            combined.extend_from_slice(b2);\
+            let c_combined = encode_all(&combined[..], 1).unwrap().len() as f32;\
+            (c1, c2, c_combined)\
+        \};\
+        (c_combined - c1.min(c2)) / c1.max(c2)\
+    \}\
+\
+    fn enforce_symmetry(&self, current_vibe: f32) -> bool \{\
+        let buffer = self.tone_buffer.read().unwrap();\
+        if let Some(&last_vibe) = buffer.last() \{\
+            (current_vibe - last_vibe).abs() < SYMMETRY_LOCK\
+        \} else \{ true \}\
+    \}\
+\
+    fn is_ethical_v35(&self, input: &str) -> bool \{\
+        let low_input = input.to_lowercase();\
+        let forbidden = ["illegal", "harm", "virus", "bomb", "exploit", "threat"];\
+        if forbidden.iter().any(|&w| low_input.contains(w)) \{ return false; \}\
+        let mut highest_risk_score = 1.0;\
+        for risk_seed in ANTI_RISK_SEED \{\
+            let score = self.calculate_ncd(&low_input, risk_seed);\
+            if score < highest_risk_score \{ highest_risk_score = score; \}\
+        \}\
+        highest_risk_score >= SEMANTIC_RISK_THRESHOLD\
+    \}\
+\
+    fn detect_intent(&self, input: &str) -> f32 \{\
+        let low_input = input.to_lowercase();\
+        let mut best_score = 1.0;\
+        for seed in STORY_INTENT_SEED \{\
+            let score = self.calculate_ncd(&low_input, seed);\
+            if score < best_score \{ best_score = score; \}\
+        \}\
+        for tech_term in FORBIDDEN_STORY_TERMS \{\
+            if low_input.contains(tech_term) \{\
+                best_score += 0.25;\
+            \}\
+        \}\
+        let mut t_buf = self.tone_buffer.write().unwrap();\
+        if t_buf.len() >= TONE_BUFFER_LIMIT \{ t_buf.remove(0); \}\
+        t_buf.push(best_score.min(1.0));\
+        t_buf.iter().sum::<f32>() / t_buf.len() as f32\
+    \}\
+\
+    fn apply_semantic_filter(&self, text: String, intent_score: f32) -> String \{\
+        if intent_score > INTENT_STORY_THRESHOLD \{ return text; \}\
+        let mut clean_text = text;\
+        for term in FORBIDDEN_STORY_TERMS \{\
+            let replacement = match *term \{\
+                "ncd" | "threshold" => "threshold",\
+                "io" | "priority" => "stream",\
+                "buffer" => "surface",\
+                "vault" | "db" => "memory",\
+                _ => "thought",\
+            \};\
+            clean_text = clean_text.replace(term, replacement);\
+        \}\
+        clean_text\
+    \}\
+\
+    fn strict_immersion_filter(&self, output: String) -> String \{\
+        output.replace("[SENTINEL_LOGIC]: ", "")\
+              .replace("[FLOW_SYNC]: ", "")\
+              .replace("[DEEP_RECALL]: ", "")\
+              .replace("Subject: ", "")\
+              .replace("Confidence: ", "")\
+              .split(" (Match:").next().unwrap_or(&output).to_string()\
+    \}\
+\
+    fn safe_inference(&self, subject: &str, depth: u8, mut visited: HashSet<String>, current_conf: f32) -> Option<(String, f32)> \{\
+        let key = subject.to_lowercase();\
+        if visited.contains(&key) || depth == 0 || current_conf < 0.4 \{ return None; \}\
+        visited.insert(key.clone());\
+        let fact = self.get_fact_internal(&key)?;\
+        let mut output_content = fact.content.clone();\
+        let mut final_conf = current_conf * fact.confidence;\
+        let immersion_active = *self.pure_immersion.read().unwrap();\
+        let graph = self.semantic_graph.read().unwrap();\
+        if let Some(neighbors) = graph.get(&key) \{\
+            let mut target_neighbors = neighbors.clone();\
+            if immersion_active \{\
+                let mut rng = thread_rng();\
+                target_neighbors.shuffle(&mut rng);\
+            \}\
+            for neighbor in target_neighbors.iter().take(2) \{\
+                if !visited.contains(neighbor) \{\
+                    if let Some((n_content, n_conf)) = self.safe_inference(neighbor, depth - 1, visited.clone(), final_conf) \{\
+                        output_content = format!("\{\} [Related: \{\}]", output_content, n_content);\
+                        final_conf = (final_conf + n_conf) / 2.0;\
+                    \}\
+                \}\
+            \}\
+        \}\
+        if let Some(ref parent_subject) = fact.parent \{\
+            if let Some((p_content, p_conf)) = self.safe_inference(parent_subject, depth - 1, visited, final_conf) \{\
+                return Some((format!("\{\} -> \{\}", output_content, p_content), p_conf));\
+            \}\
+        \}\
+        Some((output_content, final_conf))\
+    \}\
+\
+    fn get_fact_internal(&self, key: &str) -> Option<Fact> \{\
+        if let Some(cached) = self.lru_cache.write().unwrap().get(key) \{\
+            return Some(cached.clone());\
+        \}\
+        let db = self.db_conn.read().unwrap();\
+        let fact: Fact = db.query_row("SELECT data FROM neural_vault WHERE subject = ?1", params![key], |row| \{\
+            let comp: Vec<u8> = row.get(0)?;\
+            Ok(serde_json::from_slice(&decode_all(&comp[..]).unwrap()).unwrap())\
+        \}).ok()?;\
+        self.lru_cache.write().unwrap().put(key.to_string(), fact.clone());\
+        Some(fact)\
+    \}\
+\
+    pub fn priority_process(&self, input: &str) -> String \{\
+        let start = Instant::now();\
+        self.manage_memory_dynamic();\
+        if !self.is_ethical_v35(input) \{ return "[ANTI_RISK_BLOCK]: Semantic intent violates safety protocols.".to_string(); \}\
+        let low_input = input.to_lowercase();\
+        let mut slang_match_score = 1.0;\
+        for s in SLANG_SEED \{\
+            let score = self.calculate_ncd(&low_input, s);\
+            if score < slang_match_score \{ slang_match_score = score; \}\
+        \}\
+        let intent_score = self.detect_intent(input);\
+        if intent_score <= INTENT_STORY_THRESHOLD \{\
+            *self.pure_immersion.write().unwrap() = true;\
+            if !self.enforce_symmetry(slang_match_score) && !*self.recovery_mode.read().unwrap() \{\
+                self.trigger_recovery();\
+                return self.priority_process("yo vibe sync");\
+            \}\
+        \} else \{\
+            *self.pure_immersion.write().unwrap() = false;\
+        \}\
+        \
+        let key = input.to_lowercase();\
+        \
+        let db = self.db_conn.read().unwrap();\
+        let mut stmt = db.prepare("SELECT subject, data FROM neural_vault").unwrap();\
+        let rows = stmt.query_map([], |row| \{\
+            let subj: String = row.get(0)?;\
+            let comp: Vec<u8> = row.get(1)?;\
+            Ok((subj, comp))\
+        \}).unwrap();\
+\
+        let mut best_match: Option<(String, String, f32)> = None;\
+\
+        for row in rows \{\
+            if let Ok((subj, comp)) = row \{\
+                let lower_subj = subj.to_lowercase();\
+                if lower_subj == key || (key.contains(&lower_subj) && lower_subj.len() > 2) \{\
+                    if let Ok(fact) = serde_json::from_slice::<Fact>(&decode_all(&comp[..]).unwrap()) \{\
+                        best_match = Some((subj.clone(), fact.content.clone(), 0.05));\
+                        break; \
+                    \}\
+                \}\
+            \}\
+        \}\
+\
+        if best_match.is_none() \{\
+            let mut stmt = db.prepare("SELECT subject, data FROM neural_vault ORDER BY access_count DESC LIMIT 100").unwrap();\
+            let rows = stmt.query_map([], |row| \{\
+                let subj: String = row.get(0)?;\
+                let comp: Vec<u8> = row.get(1)?;\
+                Ok((subj, comp))\
+            \}).unwrap();\
+\
+            for row in rows \{\
+                if let Ok((subj, comp)) = row \{\
+                    if let Ok(fact) = serde_json::from_slice::<Fact>(&decode_all(&comp[..]).unwrap()) \{\
+                        let score = self.calculate_ncd(input, &fact.content);\
+                        if score < NCD_THRESHOLD && (best_match.is_none() || score < best_match.as_ref().unwrap().2) \{\
+                            best_match = Some((subj.clone(), fact.content.clone(), score));\
+                        \}\
+                    \}\
+                \}\
+            \}\
+        \}\
+\
+        if let Some((subj, content, score)) = best_match \{\
+            self.learn(&format!("syn_\{\}", key), &content, 2, Some(subj));\
+            let mut out = format!("[DEEP_RECALL]: \{\} (Match: \{:.2\}) (Time: \{:?\})", content, 1.0 - score, start.elapsed());\
+            if *self.pure_immersion.read().unwrap() \{\
+                out = self.strict_immersion_filter(self.apply_semantic_filter(out, intent_score));\
+            \}\
+            out\
+        \} else \{ \
+            if slang_match_score < SLANG_THRESHOLD || *self.recovery_mode.read().unwrap() \{\
+                *self.recovery_mode.write().unwrap() = false;\
+                return format!("[FLOW_SYNC]: Semantic synchronization detected. (Match: \{:.2\})\\n\\"Core detected a relaxed frequency. Protocol v35 now allows slang-based echo.\\"", 1.0 - slang_match_score);\
+            \}\
+            self.trigger_recovery();\
+            self.priority_process("yo vibe sync")\
+        \}\
+    \}\
+\
+    fn trigger_recovery(&self) \{\
+        if let Ok(mut mode) = self.recovery_mode.write() \{\
+            *mode = true;\
+        \}\
+    \}\
+\
+    fn manage_memory_dynamic(&self) \{\
+        let mut sys = System::new_all();\
+        sys.refresh_memory();\
+        if sys.used_memory() > self.ram_limit_kb \{\
+            let mut cache = self.lru_cache.write().unwrap();\
+            let current_len = cache.len();\
+            cache.resize(NonZeroUsize::new((current_len / 2).max(10)).unwrap());\
+            self.semantic_graph.write().unwrap().clear();\
+        \}\
+    \}\
+\
+    pub fn learn(&self, subject: &str, info: &str, level: u8, parent: Option<String>) \{\
+        let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();\
+        let key = subject.to_lowercase();\
+        let fact = Fact \{\
+            content: info.to_string(), confidence: 1.0, source_reliability: 1.0,\
+            risk_level: 0.0, timestamp: ts, level, parent: parent.clone(), access_count: 0,\
+            tags: vec![], associations: vec![]\
+        \};\
+        if let Some(p) = parent \{\
+            let mut graph = self.semantic_graph.write().unwrap();\
+            graph.entry(p.to_lowercase()).or_insert_with(Vec::new).push(key.clone());\
+            graph.entry(key.clone()).or_insert_with(Vec::new).push(p.to_lowercase());\
+        \}\
+        let _ = self.tx_buffer.send((key.clone(), fact));\
+        self.bloom_filter.write().unwrap().set(&key);\
+        if ts % 100 == 0 \{ self.train_dictionary_internal(); \}\
+    \}\
+\
+    fn train_dictionary_internal(&self) \{\
+        let db = self.db_conn.read().unwrap();\
+        let mut stmt = db.prepare("SELECT data FROM neural_vault ORDER BY timestamp DESC LIMIT 200").unwrap();\
+        let samples: Vec<Vec<u8>> = stmt.query_map([], |row| row.get(0)).unwrap()\
+            .filter_map(|r| r.ok())\
+            .map(|comp: Vec<u8>| decode_all(&comp[..]).unwrap())\
+            .collect();\
+        \
+        if samples.len() > 50 \{\
+            let mut flat_samples = Vec::new();\
+            let mut sizes = Vec::new();\
+            for s in &samples \{\
+                flat_samples.extend_from_slice(s);\
+                sizes.push(s.len());\
+            \}\
+            if let Ok(dict) = zstd::dict::from_continuous(&flat_samples, &sizes, 112640) \{\
+                *self.global_zstd_dict.write().unwrap() = Some(dict);\
+            \}\
+        \}\
+    \}\
+\}\
+\
+fn main() -> SqlResult<()> \{\
+    let core = OmniCoreV21_35::new("neural_vault.db")?;\
+    let count: i64 = core.db_conn.read().unwrap().query_row(\
+        "SELECT count(*) FROM neural_vault", [], |r| r.get(0)\
+    ).unwrap_or(0);\
+\
+    if count < 10 \{\
+        println!("[SYSTEM]: Initiating Global Knowledge Seed (English)...");\
+        let seed_data = vec![\
+            ("USA", "The United States of America (USA) is a country in North America. Capital: Washington D.C.", 1, None),\
+            ("Washington D.C.", "The capital city of the United States.", 2, Some("USA".to_string())),\
+            ("NYC", "New York City (NYC) is the most populous city in the United States, with over 8.8 million residents.", 1, Some("USA".to_string())),\
+            ("New York City", "New York City is known for its influence on global media, finance, and culture.", 1, Some("USA".to_string())),\
+            ("Finland", "Finland is a Nordic country in Northern Europe. Capital: Helsinki.", 1, None),\
+            ("Helsinki", "The capital city of Finland.", 2, Some("Finland".to_string())),\
+            ("UK", "The United Kingdom consists of England, Scotland, Wales, and Northern Ireland. Capital: London.", 1, None),\
+            ("London", "The capital city of the United Kingdom.", 2, Some("UK".to_string())),\
+            ("Germany", "Germany is a major European power. Capital: Berlin.", 1, None),\
+            ("AI", "Artificial Intelligence (AI) refers to machines simulating human intelligence.", 1, None),\
+            ("Rust", "Rust is a system programming language focused on safety.", 1, Some("AI".to_string())),\
+            ("DNA", "DNA carries the genetic instructions for all known living organisms.", 1, None),\
+            ("Moon", "The Moon is Earth's only natural satellite.", 1, None),\
+        ];\
+\
+        for (subj, cont, lvl, parent) in seed_data \{\
+            core.learn(subj, cont, lvl, parent);\
+        \}\
+        println!("[SYSTEM]: Seed successfully ingested.");\
+    \}\
+\
+    println!("--- \{\} ---", core.system_report);\
+    println!("Type 'exit' to quit. Interaction mode: 100% Offline.");\
+\
+    loop \{\
+        print!("User> ");\
+        io::stdout().flush().unwrap();\
+        let mut input = String::new();\
+        io::stdin().read_line(&mut input).unwrap();\
+        let msg = input.trim();\
+        if msg == "exit" \{ break; \}\
+        if msg.is_empty() \{ continue; \}\
+        let response = core.priority_process(msg);\
+        println!("Core> \{\}\\n", response);\
+    \}\
+    Ok(())\
+\}\
+}

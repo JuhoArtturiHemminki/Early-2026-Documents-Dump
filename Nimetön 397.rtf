@@ -1,0 +1,116 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 use core::arch::asm;\
+use core::arch::x86_64::\{_mm_lfence, _rdtscp, _mm_pause\};\
+use core::hint::black_box;\
+use core::sync::atomic::\{Ordering, compiler_fence, AtomicBool\};\
+\
+#[repr(C, align(64))]\
+pub struct AdaSafeLayer1 \{\
+    pub t_pulse: u64,\
+    pub t_safety: u64,\
+    pub t_smm_poll: u64,\
+    \
+    // Explicit padding to isolate 'active' on its own L1 cache line (64 bytes)\
+    // Prevents false sharing and RFO (Request For Ownership) interference.\
+    _pad0: [u8; 40], \
+    pub active: AtomicBool,\
+    _pad1: [u8; 56],\
+\}\
+\
+impl AdaSafeLayer1 \{\
+    #[inline(always)]\
+    fn barrier_serialize(&self) \{\
+        // Use the architectural SERIALIZE instruction if available (Intel Sapphire Rapids+)\
+        // It provides a complete hazard barrier for both speculation and memory.\
+        #[cfg(target_feature = "serialize")]\
+        unsafe \{ asm!("serialize", options(nosync, nostack, preserves_flags)); \}\
+        \
+        // Fallback for older architectures: MFENCE handles memory, LFENCE handles speculation.\
+        #[cfg(not(target_feature = "serialize"))]\
+        unsafe \{ \
+            asm!("mfence", "lfence", options(nosync, nostack, preserves_flags)); \
+        \}\
+    \}\
+\
+    #[inline(never)]\
+    pub fn execute_ultra_deterministic<F>(&self, mut f: F) -> Result<u64, &'static str>\
+    where\
+        F: FnMut(),\
+    \{\
+        // Load config into registers to avoid memory access latency during the critical loop.\
+        let t_p = self.t_pulse;\
+        let t_s = self.t_smm_poll;\
+        let t_safe = self.t_safety;\
+        \
+        let t_stable_window = t_s.saturating_sub(t_p + t_safe);\
+        if t_stable_window == 0 \{ return Err("ADA_CONFIG_INVALID_WINDOW"); \}\
+\
+        // 1. WARMUP: Priming I-Cache and Branch Target Buffer (BTB).\
+        for _ in 0..20000 \{\
+            black_box(f());\
+        \}\
+\
+        let mut retry_count: u32 = 0;\
+\
+        while self.active.load(Ordering::Acquire) \{\
+            // 2. SYNCHRONIZATION: Clear speculation and pipeline hazards.\
+            self.barrier_serialize();\
+            \
+            let wait_start = unsafe \{ core::arch::x86_64::_rdtsc() \};\
+            _mm_lfence();\
+\
+            // Busy-wait in C0 state to prevent core sleep/latency spikes.\
+            while unsafe \{ core::arch::x86_64::_rdtsc().wrapping_sub(wait_start) \} < t_stable_window \{\
+                compiler_fence(Ordering::SeqCst);\
+            \}\
+\
+            // 3. EXECUTION BARRIER: Ensure the wait is fully retired before the measurement.\
+            self.barrier_serialize();\
+            \
+            let mut aux0: u32 = 0;\
+            let mut aux1: u32 = 0;\
+\
+            let elapsed = unsafe \{\
+                // T0: Start measurement. RDTSCP is partially serializing; LFENCE ensures it finishes.\
+                let t0 = _rdtscp(&mut aux0);\
+                _mm_lfence(); \
+\
+                // 4. CRITICAL SECTION: Tightest possible execution window.\
+                compiler_fence(Ordering::SeqCst);\
+                black_box(f());\
+                compiler_fence(Ordering::SeqCst);\
+\
+                // T1: End measurement. LFENCE ensures f() instructions are retired.\
+                _mm_lfence(); \
+                let t1 = _rdtscp(&mut aux1);\
+                \
+                // Final serialization to prevent any leakage of following instructions.\
+                self.barrier_serialize();\
+                \
+                t1.wrapping_sub(t0)\
+            \};\
+                \
+            // 5. VALIDATION: Check for Core migration (aux), Execution time (pulse), and SMI (TSC jump).\
+            if aux0 == aux1 && elapsed <= t_p \{\
+                return Ok(elapsed);\
+            \}\
+\
+            // 6. ADAPTIVE RECOVERY: Exponential back-off using PAUSE to be SMT-friendly.\
+            retry_count += 1;\
+            if retry_count > 1_000_000 \{ return Err("ADA_SYSTEM_JITTER_FATAL"); \}\
+            \
+            for _ in 0..(retry_count & 0x1F) \{ \
+                _mm_pause(); \
+            \}\
+        \}\
+        \
+        Err("ADA_INACTIVE")\
+    \}\
+\}\
+}

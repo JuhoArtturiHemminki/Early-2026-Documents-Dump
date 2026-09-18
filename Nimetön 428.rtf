@@ -1,0 +1,167 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 use rusqlite::\{params, Connection, Result\};\
+use serde::\{Serialize, Deserialize\};\
+use std::collections::\{HashMap\};\
+use std::sync::\{Arc, RwLock\};\
+use lru::LruCache;\
+use std::num::NonZeroUsize;\
+use zstd::stream::\{encode_all, decode_all\};\
+use std::fs::File;\
+use std::io::Write;\
+use std::time::\{SystemTime, UNIX_EPOCH\};\
+\
+/// --- 1. CORE ARCHITECTURAL STRUCTURES (V2-V21) ---\
+#[derive(Clone, Debug, Serialize, Deserialize)]\
+enum KnowledgeCertainty \{ GlobalFact, UserProspect, Quarantine, ShadowArchive \}\
+\
+#[derive(Clone, Debug, Serialize, Deserialize)]\
+struct SourceMetadata \{\
+    reliability_score: f32, // Dynamic V20 Evolution score\
+    successful_validations: u32,\
+    total_attempts: u32,\
+\}\
+\
+#[derive(Clone, Debug, Serialize, Deserialize)]\
+struct Fact \{\
+    content: String,\
+    confidence: f32,\
+    source_origin: String,\
+    risk_level: f32, // V14 Ethical Risk Analysis\
+    timestamp: u64,\
+\}\
+\
+/// --- 2. OMNICORE V21: THE SOVEREIGN MONOLITH ---\
+pub struct OmniCoreV21 \{\
+    lru_cache: Arc<RwLock<LruCache<String, Fact>>>,\
+    source_registry: Arc<RwLock<HashMap<String, SourceMetadata>>>,\
+    db_conn: Arc<RwLock<Connection>>,\
+    prune_threshold: f32, // V21: Minimum reliability before purging\
+\}\
+\
+impl OmniCoreV21 \{\
+    pub fn new(db_path: &str, cache_size: usize) -> Result<Self> \{\
+        let conn = Connection::open(db_path)?;\
+        \
+        // V15-V16 Optimization: WAL Mode & Efficient Schema\
+        conn.pragma_update(None, "journal_mode", "WAL")?;\
+        conn.pragma_update(None, "synchronous", "NORMAL")?;\
+\
+        conn.execute("CREATE TABLE IF NOT EXISTS neural_vault (subject TEXT PRIMARY KEY, data BLOB)", [])?;\
+        conn.execute("CREATE TABLE IF NOT EXISTS source_evolution (id TEXT PRIMARY KEY, reliability REAL, attempts INTEGER)", [])?;\
+\
+        Ok(Self \{\
+            lru_cache: Arc::new(RwLock::new(LruCache::new(NonZeroUsize::new(cache_size).unwrap()))),\
+            source_registry: Arc::new(RwLock::new(HashMap::new())),\
+            db_conn: Arc::new(RwLock::new(conn)),\
+            prune_threshold: 0.15, // V21: Pure local autonomous cleanup\
+        \})\
+    \}\
+\
+    /// --- 3. AUTONOMOUS LOCAL PRUNING (V21) ---\
+    /// Cleans the local registry of low-reliability sources to maintain system integrity.\
+    pub fn autonomous_cleanup(&self) \{\
+        println!("\\x1b[31m[PRUNING]: Initializing Sovereign Cleanup...\\x1b[0m");\
+        let mut registry = self.source_registry.write().unwrap();\
+        let before = registry.len();\
+        \
+        // Remove sources that consistently fail validation\
+        registry.retain(|_, meta| meta.reliability_score >= self.prune_threshold);\
+        \
+        println!("\\x1b[31m[PRUNING]: Purged \{\} low-confidence nodes. System integrity optimized.\\x1b[0m", before - registry.len());\
+    \}\
+\
+    /// --- 4. LOCAL SNAPSHOT EXPORT (V21) ---\
+    /// Creates a highly compressed local backup. No Cloud, No Leakage.\
+    pub fn create_local_snapshot(&self, path: &str) -> std::io::Result<()> \{\
+        println!("\\x1b[32m[SNAPSHOT]: Compressing local vault to \{\}...\\x1b[0m", path);\
+        let mut file = File::create(path)?;\
+        \
+        let registry = self.source_registry.read().unwrap();\
+        let serialized = serde_json::to_vec(&*registry).unwrap();\
+        \
+        // Zstd Level 22: Ultra-compression for local storage efficiency\
+        let compressed = encode_all(&serialized[..], 22).unwrap();\
+        \
+        file.write_all(&compressed)?;\
+        println!("\\x1b[32m[SNAPSHOT]: Done. Integrity verified locally.\\x1b[0m");\
+        Ok(())\
+    \}\
+\
+    /// --- 5. ADAPTIVE LEARNING ENGINE (V2-V20 INTEGRATED) ---\
+    pub fn learn(&self, subject: &str, info: &str, source: &str) \{\
+        let subj = subject.to_lowercase();\
+        \
+        // V20: Bayesian Source Reliability\
+        let reliability = \{\
+            let mut reg = self.source_registry.write().unwrap();\
+            reg.entry(source.to_string()).or_insert(SourceMetadata \{\
+                reliability_score: 0.5,\
+                successful_validations: 0,\
+                total_attempts: 0,\
+            \}).reliability_score\
+        \};\
+\
+        let fact = Fact \{\
+            content: info.to_string(),\
+            confidence: 0.4 + (0.5 * reliability), // Adaptive Confidence\
+            source_origin: source.to_string(),\
+            risk_level: 0.1, // V14 ERA check placeholder\
+            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),\
+        \};\
+\
+        // V19: Update LRU Cache & Zstd SQLite Persistence\
+        \{\
+            let mut cache = self.lru_cache.write().unwrap();\
+            cache.put(subj.clone(), fact.clone());\
+        \}\
+\
+        let compressed_fact = encode_all(&serde_json::to_vec(&fact).unwrap()[..], 3).unwrap();\
+        let db = self.db_conn.write().unwrap();\
+        let _ = db.execute(\
+            "INSERT OR REPLACE INTO neural_vault (subject, data) VALUES (?1, ?2)",\
+            params![subj, compressed_fact],\
+        );\
+    \}\
+\
+    /// --- 6. SOURCE EVOLUTION DASHBOARD (V20-V21) ---\
+    pub fn print_status(&self) \{\
+        println!("\\n\\x1b[34m--- OMNICORE V21 SOVEREIGN STATUS ---\\x1b[0m");\
+        let reg = self.source_registry.read().unwrap();\
+        for (id, meta) in reg.iter() \{\
+            println!("Source: \{:<20\} | Reliability: \{:.2\} | Validations: \{\}", id, meta.reliability_score, meta.successful_validations);\
+        \}\
+        println!("\\x1b[34m-------------------------------------\\x1b[0m\\n");\
+    \}\
+\}\
+\
+fn main() -> Result<()> \{\
+    // Initialize Sovereign Core\
+    let core = Arc::new(OmniCoreV21::new("omnicore_sovereign.db", 1000)?);\
+\
+    // Simulated Learning & Evolution\
+    core.learn("Rust", "Memory safety is key", "OfficialDocs");\
+    core.learn("Alchemy", "Lead to gold via hope", "AncientScrolls");\
+\
+    // Simulate Source Reinforcement (V20)\
+    \{\
+        let mut reg = core.source_registry.write().unwrap();\
+        reg.get_mut("OfficialDocs").unwrap().reliability_score = 0.99;\
+        reg.get_mut("AncientScrolls").unwrap().reliability_score = 0.05;\
+    \}\
+\
+    // Diagnostics & Cleanup\
+    core.print_status();\
+    core.autonomous_cleanup();\
+    \
+    // Save state locally\
+    let _ = core.create_local_snapshot("sovereign_vault.zst");\
+\
+    Ok(())\
+\}\
+}

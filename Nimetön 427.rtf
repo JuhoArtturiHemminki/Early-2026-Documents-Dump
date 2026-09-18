@@ -1,0 +1,88 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 use std::collections::HashMap;\
+\
+/// --- 1. TIEDON LUOKITTELU (Epistemology) ---\
+#[derive(Clone, Debug, PartialEq)]\
+enum KnowledgeCertainty \{\
+    GlobalFact,        // Internet-varmistettu\
+    UserProspect,      // K\'e4ytt\'e4j\'e4n kertoma, ei l\'f6ydy netist\'e4 (huomautuspakko)\
+    AwaitingOnline,    // Offline-tilassa saatu tieto, odottaa tarkistusta\
+\}\
+\
+#[derive(Clone)]\
+struct Fact \{\
+    content: String,\
+    source: KnowledgeCertainty,\
+\}\
+\
+pub struct OmniCoreV9 \{\
+    brain: HashMap<String, Fact>,\
+    online_mode: bool, // Simuloitu internet-yhteys\
+\}\
+\
+impl OmniCoreV4 \{ // Jatkumona aiempaan ytimeen\
+    pub fn learn(&mut self, subject: &str, info: &str) \{\
+        let subject_key = subject.to_lowercase();\
+\
+        if self.online_mode \{\
+            // A. ONLINE-TARKISTUS\
+            let (is_globally_supported, exists_online) = self.simulate_web_search(subject, info);\
+\
+            if is_globally_supported \{\
+                self.brain.insert(subject_key, Fact \{\
+                    content: info.to_string(),\
+                    source: KnowledgeCertainty::GlobalFact,\
+                \});\
+                println!("\\x1b[32m[GLOBAL]: Faktatarkistus l\'e4p\'e4isty. Tieto tallennettu absoluuttisena.\\x1b[0m");\
+            \} else if !exists_online \{\
+                // B. EI L\'d6YDY NETIST\'c4 -> PROSPEKTI\
+                self.brain.insert(subject_key, Fact \{\
+                    content: info.to_string(),\
+                    source: KnowledgeCertainty::UserProspect,\
+                \});\
+                println!("\\x1b[33m[PROSPECT]: Tieto on uniikki. Tallennettu k\'e4ytt\'e4j\'e4n omana n\'e4kemyksen\'e4.\\x1b[0m");\
+            \} else \{\
+                println!("\\x1b[31m[REJECTED]: Internet vastustaa t\'e4t\'e4 v\'e4itett\'e4. Ei tallennettu.\\x1b[0m");\
+            \}\
+        \} else \{\
+            // C. OFFLINE-TILA\
+            self.brain.insert(subject_key, Fact \{\
+                content: info.to_string(),\
+                source: KnowledgeCertainty::AwaitingOnline,\
+            \});\
+            println!("\\x1b[34m[BUFFERED]: Offline-tila. Tieto odottaa nettiyhteytt\'e4 varmistusta varten.\\x1b[0m");\
+        \}\
+    \}\
+\
+    /// --- VASTAUSLOGIIKKA: Sis\'e4lt\'e4\'e4 pakollisen huomautuksen ---\
+    pub fn answer(&self, subject: &str) -> String \{\
+        if let Some(fact) = self.brain.get(&subject.to_lowercase()) \{\
+            match fact.source \{\
+                KnowledgeCertainty::GlobalFact => \{\
+                    format!("Tied\'e4n, ett\'e4 \{\}.", fact.content)\
+                \}\
+                KnowledgeCertainty::UserProspect => \{\
+                    format!("Olet kertonut minulle, ett\'e4 \{\}, mutta en ole voinut varmistaa t\'e4t\'e4 riippumattomista l\'e4hteist\'e4.", fact.content)\
+                \}\
+                KnowledgeCertainty::AwaitingOnline => \{\
+                    "T\'e4m\'e4 tieto odottaa viel\'e4 online-varmistusta. En voi k\'e4ytt\'e4\'e4 sit\'e4 viel\'e4.".to_string()\
+                \}\
+            \}\
+        \} else \{\
+            "En tied\'e4 t\'e4st\'e4 viel\'e4 mit\'e4\'e4n.".to_string()\
+        \}\
+    \}\
+\
+    // Simuloitu API-kutsu (esim. Google Search API / Perplexity)\
+    fn simulate_web_search(&self, _s: &str, _i: &str) -> (bool, bool) \{\
+        // T\'e4ss\'e4 kohtaa AI kutsuisi oikeasti hakukonetta\
+        (false, false) // Esimerkki: Ei l\'f6ydy netist\'e4\
+    \}\
+\}\
+}

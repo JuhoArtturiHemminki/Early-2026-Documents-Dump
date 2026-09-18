@@ -1,0 +1,230 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 use rusqlite::\{params, Connection, Result\};\
+use serde::\{Serialize, Deserialize\};\
+use std::sync::\{Arc, RwLock\};\
+use lru::LruCache;\
+use std::num::NonZeroUsize;\
+use zstd::stream::\{encode_all, decode_all\};\
+use sysinfo::System; // V21.6 Hardware-aware core logic\
+use bloomfilter::Bloom;\
+use std::time::\{SystemTime, UNIX_EPOCH\};\
+use std::io::\{self, Write\};\
+\
+/// --- 1. ARCHITECTURAL DYNAMIC RATIOS (UNIVERSAL) ---\
+const TOTAL_RAM_USAGE_RATIO: f64 = 0.10; // Use 10% of total system RAM\
+const BLOOM_RAM_PORTION: f64 = 0.20;     // 20% of OmniCore's budget for Bloom\
+const CACHE_RAM_PORTION: f64 = 0.80;     // 80% of OmniCore's budget for Cache\
+\
+#[derive(Clone, Debug, Serialize, Deserialize)]\
+struct Fact \{\
+    content: String,\
+    confidence: f32,      \
+    source_reliability: f32,\
+    risk_level: f32,      \
+    timestamp: u64,\
+\}\
+\
+pub struct OmniCoreV21_17 \{\
+    lru_cache: Arc<RwLock<LruCache<String, Fact>>>,\
+    bloom_filter: Arc<RwLock<Bloom<String>>>, \
+    db_conn: Arc<RwLock<Connection>>,\
+    system_report: String,\
+    history_logging_enabled: Arc<RwLock<bool>>, \
+\}\
+\
+impl OmniCoreV21_17 \{\
+    /// --- V21.17: THE UNIVERSAL ADAPTIVE INITIALIZER ---\
+    /// No hardcoded 8GB limits. Scans ANY environment and scales at boot.\
+    pub fn new(path: &str) -> Result<Self> \{\
+        let mut sys = System::new_all();\
+        sys.refresh_memory();\
+        let total_ram_kb = sys.total_memory();\
+        \
+        // 1. DYNAMIC BUDGETING (10% Rule)\
+        let omnicore_ram_kb = (total_ram_kb as f64 * TOTAL_RAM_USAGE_RATIO) as u64;\
+        let omnicore_ram_mb = omnicore_ram_kb / 1024;\
+\
+        // 2. DYNAMIC BLOOM CALCULATION (0.1% Precision)\
+        // Calculating capacity based on allocated RAM portion (20% of budget)\
+        let bloom_ram_kb = (omnicore_ram_kb as f64 * BLOOM_RAM_PORTION) as usize;\
+        let dynamic_bloom_capacity = (bloom_ram_kb * 8 * 1024) / 15; \
+        let bloom_fp_rate = 0.001; \
+\
+        // 3. DYNAMIC CACHE ALLOCATION (80% of budget)\
+        let cache_ram_kb = (omnicore_ram_kb as f64 * CACHE_RAM_PORTION) as usize;\
+        let cache_item_estimate_kb = 2; // Average Fact size estimate\
+        let dynamic_cache_size = (cache_ram_kb / cache_item_estimate_kb).max(1000);\
+\
+        // 4. DATABASE ENGINE\
+        let conn = Connection::open(path)?;\
+        conn.pragma_update(None, "journal_mode", "WAL")?;\
+        conn.pragma_update(None, "synchronous", "NORMAL")?;\
+        conn.execute("CREATE TABLE IF NOT EXISTS neural_vault (subject TEXT PRIMARY KEY, data BLOB)", [])?;\
+\
+        let is_empty: i64 = conn.query_row("SELECT count(*) FROM neural_vault", [], |r| r.get(0))?;\
+\
+        let core = Self \{\
+            lru_cache: Arc::new(RwLock::new(LruCache::new(NonZeroUsize::new(dynamic_cache_size).unwrap()))),\
+            bloom_filter: Arc::new(RwLock::new(Bloom::new_for_fp_rate(dynamic_bloom_capacity, bloom_fp_rate))),\
+            db_conn: Arc::new(RwLock::new(conn)),\
+            system_report: format!(\
+                "OmniCore V21.17 | Budget: \{\}MB | Capacity: \{\}M | Cache: \{\} items", \
+                omnicore_ram_mb, (dynamic_bloom_capacity / 1_000_000), dynamic_cache_size\
+            ),\
+            history_logging_enabled: Arc::new(RwLock::new(false)),\
+        \};\
+\
+        if is_empty == 0 \{ core.run_setup_wizard()?; \}\
+        Ok(core)\
+    \}\
+\
+    /// --- V21.17: INTENT-AWARE SETUP WIZARD ---\
+    fn run_setup_wizard(&self) -> Result<()> \{\
+        println!("\\x1b[1;36m--- OMNICORE UNIVERSAL SETUP (V21.17) ---\\x1b[0m");\
+\
+        // STAGE 1: MASSIVE SEED\
+        print!("1. Load Initial Knowledge Seed (Physics, Logic, Culture)? (Y/N): ");\
+        io::stdout().flush().unwrap();\
+        let mut seed_input = String::new();\
+        io::stdin().read_line(&mut seed_input).unwrap();\
+        if seed_input.trim().to_uppercase() == "Y" \{\
+            let seed_data = vec![\
+                ("Physics".to_string(), "Laws of the universe.".to_string()),\
+                ("Chicago".to_string(), "Grandiosa territory.".to_string()),\
+            ];\
+            self.dynamic_internet_seed(seed_data)?;\
+        \}\
+\
+        // STAGE 2: INTENT-AWARE CONVERSATION HISTORY\
+        println!("2. Enable Conversation History logging?");\
+        println!("\\x1b[0;37m   (Memory recall activates ONLY if both temporal and action intent are detected.)\\x1b[0m");\
+        print!("Selection (Y/N): ");\
+        io::stdout().flush().unwrap();\
+        let mut history_input = String::new();\
+        io::stdin().read_line(&mut history_input).unwrap();\
+        if history_input.trim().to_uppercase() == "Y" \{\
+            let mut enabled = self.history_logging_enabled.write().unwrap();\
+            *enabled = true;\
+            println!("\\x1b[1;32m[HISTORY]: Active. Intent-Aware Recall enabled.\\x1b[0m");\
+        \}\
+        Ok(())\
+    \}\
+\
+    /// --- V21.17: SEMANTIC INTENT DETECTION ---\
+    /// Requires TEMPORAL (when) AND ACTION (verb) keywords to trigger recall.\
+    fn has_recall_intent(&self, input: &str) -> bool \{\
+        let input_lower = input.to_lowercase();\
+        let temporal = input_lower.contains("viimeksi") || input_lower.contains("aiemmin") || \
+                       input_lower.contains("last time") || input_lower.contains("previously");\
+        let action = input_lower.contains("kysyin") || input_lower.contains("sanoin") || \
+                     input_lower.contains("said") || input_lower.contains("asked") || \
+                     input_lower.contains("puhuttiin");\
+        temporal && action\
+    \}\
+\
+    /// --- V21.17: DYNAMIC PROCESSOR ---\
+    pub fn process(&self, input: &str) -> String \{\
+        let logging_on = *self.history_logging_enabled.read().unwrap();\
+        let input_lower = input.to_lowercase();\
+\
+        // 1. RECALL TRIGGER: Intent-Aware Check\
+        if logging_on && self.has_recall_intent(input) \{\
+            return self.recall_history();\
+        \}\
+\
+        // 2. STORY MODE: Semantic Purge (V21.10)\
+        if input_lower.contains("story") || input_lower.contains("tarina") || input_lower.contains("imagine") \{\
+            let raw = format!("Reality unraveled. \{\}", input.replace("Write a story", ""));\
+            return self.apply_immersion_filter(raw);\
+        \}\
+\
+        // 3. LOGGING: Active only with permission\
+        if logging_on \{\
+            let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();\
+            self.learn(&format!("hist_\{\}", timestamp), input); \
+        \}\
+\
+        self.answer(input)\
+    \}\
+\
+    /// --- V21.11: ATOMIC TRANSACTION SEEDER ---\
+    pub fn dynamic_internet_seed(&self, raw_data: Vec<(String, String)>) -> Result<()> \{\
+        let mut conn = self.db_conn.write().unwrap();\
+        let tx = conn.transaction()?; \
+        \{\
+            let mut bloom = self.bloom_filter.write().unwrap();\
+            let mut cache = self.lru_cache.write().unwrap();\
+            for (subject, info) in raw_data \{\
+                let key = subject.to_lowercase();\
+                let fact = Fact \{ content: info, confidence: 1.0, source_reliability: 1.0, risk_level: 0.0, timestamp: 0 \};\
+                bloom.set(&key);\
+                cache.put(key.clone(), fact.clone());\
+                let serialized = serde_json::to_vec(&fact).unwrap();\
+                let compressed = encode_all(&serialized[..], 3).unwrap();\
+                tx.execute("INSERT OR REPLACE INTO neural_vault (subject, data) VALUES (?1, ?2)", params![key, compressed])?;\
+            \}\
+        \}\
+        tx.commit()?;\
+        Ok(())\
+    \}\
+\
+    fn apply_immersion_filter(&self, text: String) -> String \{\
+        let banned = vec!["OmniCore", "V21.17", "Sovereign", "ERA"];\
+        let mut clean = text;\
+        for term in banned \{ clean = clean.replace(term, "the core"); \}\
+        clean.replace("[SIMULATION]", "").trim().to_string()\
+    \}\
+\
+    pub fn answer(&self, subject: &str) -> String \{\
+        let key = subject.to_lowercase();\
+        // Dynamic Bloom Shield Check\
+        if !self.bloom_filter.read().unwrap().check(&key) \{\
+            return format!("[ERA_REJECTED]: '\{\}' unknown.", subject);\
+        \}\
+        format!("[LOAD_ACTIVE]: Evaluating '\{\}' in Sovereign Vault.", key)\
+    \}\
+\
+    fn recall_history(&self) -> String \{\
+        let db = self.db_conn.read().unwrap();\
+        let mut stmt = db.prepare("SELECT data FROM neural_vault WHERE subject LIKE 'hist_%' ORDER BY subject DESC LIMIT 1").unwrap();\
+        let result = stmt.query_row([], |row| \{\
+            let compressed: Vec<u8> = row.get(0)?;\
+            let decompressed = decode_all(&compressed[..]).unwrap();\
+            let f: Fact = serde_json::from_slice(&decompressed).unwrap();\
+            Ok(f.content)\
+        \});\
+        match result \{\
+            Ok(c) => format!("[RECALL_HIT]: Previously, you said: '\{\}'", c),\
+            Err(_) => "[RECALL_EMPTY]: No history logs found.".to_string(),\
+        \}\
+    \}\
+\
+    pub fn learn(&self, subject: &str, info: &str) \{\
+        let key = subject.to_lowercase();\
+        let fact = Fact \{ content: info.to_string(), confidence: 1.0, source_reliability: 1.0, risk_level: 0.0, timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() \};\
+        \{\
+            let mut bloom = self.bloom_filter.write().unwrap();\
+            bloom.set(&key);\
+            let mut cache = self.lru_cache.write().unwrap();\
+            cache.put(key.clone(), fact.clone());\
+        \}\
+        let serialized = serde_json::to_vec(&fact).unwrap();\
+        let compressed = encode_all(&serialized[..], 3).unwrap();\
+        let db = self.db_conn.write().unwrap();\
+        let _ = db.execute("INSERT OR REPLACE INTO neural_vault (subject, data) VALUES (?1, ?2)", params![key, compressed]);\
+    \}\
+\}\
+\
+fn main() -> Result<()> \{\
+    // BOOT: Dynamic resource scaling active. Setup wizard triggers if vault is new.\
+    let core = Arc::new(OmniCoreV21_17::new("omnicore_v21_17.db")?);\
+    println!("\\x1b[1;36m\{\}\\x1b[0m", core.system_report);\
+    Ok(())\
+\}\
+}

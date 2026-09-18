@@ -1,0 +1,96 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 use core::arch::asm;\
+use core::arch::x86_64::\{_mm_lfence, _rdtscp, _mm_pause\};\
+use core::hint::black_box;\
+use core::sync::atomic::\{Ordering, compiler_fence, AtomicBool\};\
+\
+#[repr(C, align(64))]\
+pub struct AdaSafeLayer1 \{\
+    pub t_pulse: u64,\
+    pub t_safety: u64,\
+    pub t_smm_poll: u64,\
+    _pad0: [u8; 40], \
+    pub active: AtomicBool,\
+    _pad1: [u8; 56],\
+\}\
+\
+impl AdaSafeLayer1 \{\
+    #[inline(always)]\
+    fn barrier_serialize(&self) \{\
+        #[cfg(target_feature = "serialize")]\
+        unsafe \{ asm!("serialize", options(nosync, nostack, preserves_flags)); \}\
+        #[cfg(not(target_feature = "serialize"))]\
+        unsafe \{ asm!("mfence", "lfence", options(nosync, nostack, preserves_flags)); \}\
+    \}\
+\
+    #[inline(never)]\
+    pub fn execute_ultra_deterministic<F>(&self, mut f: F) -> Result<u64, &'static str>\
+    where\
+        F: FnMut(),\
+    \{\
+        let t_p = self.t_pulse;\
+        let t_s = self.t_smm_poll;\
+        let t_safe = self.t_safety;\
+        \
+        let t_stable_window = t_s.saturating_sub(t_p + t_safe);\
+        if t_stable_window == 0 \{ return Err("ADA_CONFIG_INVALID_WINDOW"); \}\
+\
+        for _ in 0..20000 \{\
+            black_box(f());\
+        \}\
+\
+        let mut retry_count: u32 = 0;\
+\
+        while self.active.load(Ordering::Acquire) \{\
+            self.barrier_serialize();\
+            \
+            let wait_start = unsafe \{ core::arch::x86_64::_rdtsc() \};\
+            _mm_lfence();\
+\
+            while unsafe \{ core::arch::x86_64::_rdtsc().wrapping_sub(wait_start) \} < t_stable_window \{\
+                compiler_fence(Ordering::SeqCst);\
+            \}\
+\
+            self.barrier_serialize();\
+            \
+            let mut aux0: u32 = 0;\
+            let mut aux1: u32 = 0;\
+\
+            let elapsed = unsafe \{\
+                let t0 = _rdtscp(&mut aux0);\
+                _mm_lfence(); \
+\
+                compiler_fence(Ordering::SeqCst);\
+                black_box(f());\
+                compiler_fence(Ordering::SeqCst);\
+\
+                _mm_lfence(); \
+                let t1 = _rdtscp(&mut aux1);\
+                \
+                self.barrier_serialize();\
+                \
+                t1.wrapping_sub(t0)\
+            \};\
+                \
+            if aux0 == aux1 && elapsed <= t_p \{\
+                return Ok(elapsed);\
+            \}\
+\
+            retry_count += 1;\
+            if retry_count > 1_000_000 \{ return Err("ADA_SYSTEM_JITTER_FATAL"); \}\
+            \
+            for _ in 0..(retry_count & 0x1F) \{ \
+                _mm_pause(); \
+            \}\
+        \}\
+        \
+        Err("ADA_INACTIVE")\
+    \}\
+\}\
+}

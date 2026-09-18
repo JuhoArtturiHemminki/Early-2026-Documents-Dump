@@ -1,0 +1,96 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 use std::\{ptr, mem::\{self, size_of as sz\}, alloc, arch::asm\};\
+use rayon::prelude::*;\
+use core_affinity::\{get_core_ids, set_for_current, CoreId\};\
+#[cfg(target_arch="x86_64")] use std::arch::x86_64::*;\
+#[cfg(target_arch="aarch64")] use std::arch::aarch64::*;\
+\
+#[repr(C, align(64))] pub struct TileConfig \{ pub p_id: u8, pub s_row: u8, pub res: [u8; 14], pub colsb: [u16; 16], pub rows: [u8; 16] \}\
+#[derive(PartialEq, Clone, Copy)] pub enum OperationType \{ LinearLogic, MatrixMatrix, OmniCompute \}\
+struct AlignedStorage \{ ptr: *mut u8, layout: alloc::Layout, size: usize \}\
+impl AlignedStorage \{\
+    fn new(size: usize) -> Result<Self, String> \{\
+        let layout = alloc::Layout::from_size_align(size, if size >= 2097152 \{ 2097152 \} else \{ 64 \}).map_err(|e| e.to_string())?;\
+        let ptr = unsafe \{\
+            let p = alloc::alloc(layout); if p.is_null() \{ return Err("Alloc failed".into()); \}\
+            #[cfg(target_os="linux")] \{\
+                libc::madvise(p as _, size, libc::MADV_HUGEPAGE);\
+                let mut n = 0; if libc::getcpu(ptr::null_mut(), &mut n, ptr::null_mut()) == 0 \{\
+                    let m: usize = 1 << n; libc::syscall(libc::SYS_mbind, p, size, 2, &m, 32, 0);\
+                \}\
+            \} p\
+        \}; Ok(Self \{ ptr, layout, size \})\
+    \}\
+\}\
+impl Drop for AlignedStorage \{ fn drop(&mut self) \{ unsafe \{ alloc::dealloc(self.ptr, self.layout); \} \} \}\
+struct CpuCaps \{ has_amx: bool, has_a512: bool, has_vnni: bool, has_sme: bool, l2: usize, l3: usize, pc: Vec<CoreId>, ec: Vec<CoreId> \}\
+impl CpuCaps \{\
+    fn detect() -> Self \{\
+        let (mut amx, mut a512, mut vnni, mut l2r, mut l3r) = (false, false, false, 262144, 2097152);\
+        #[cfg(target_arch="x86_64")] unsafe \{\
+            amx = is_x86_feature_detected!("amx-tile"); a512 = is_x86_feature_detected!("avx512f"); vnni = is_x86_feature_detected!("avx512vnni");\
+            let c2 = __cpuid(0x8000_0006); if c2.ecx >> 16 > 0 \{ l2r = (c2.ecx >> 16) as usize * 1024; \}\
+            let c1 = __cpuid(4); l3r = ((((c1.ebx >> 22) & 0x3FF) + 1) * (((c1.ebx >> 12) & 0x3FF) + 1) * ((c1.ebx & 0xFFF) + 1) * (c1.ecx + 1)) as usize;\
+            if amx \{ libc::syscall(libc::SYS_arch_prctl, 0x1023, 18); \}\
+        \}\
+        let all = get_core_ids().unwrap_or_default(); let (mut pc, mut ec) = (vec![], vec![]);\
+        for c in all \{ #[cfg(target_arch="x86_64")] if (unsafe\{__cpuid_count(0x1A, 0)\}.eax >> 24) == 0x40 \{ pc.push(c) \} else \{ ec.push(c) \} #[cfg(not(target_arch="x86_64"))] pc.push(c); \}\
+        Self \{ has_amx: amx, has_a512: a512, has_vnni: vnni, has_sme: cfg!(target_arch="aarch64"), l2: l2r, l3: l3r, pc, ec \}\
+    \}\
+\}\
+pub struct AxionFabricV24 \{ s: AlignedStorage, c: CpuCaps, pp: rayon::ThreadPool, ep: rayon::ThreadPool \}\
+impl AxionFabricV24 \{\
+    pub fn new(size: usize) -> Result<Self, String> \{\
+        let caps = CpuCaps::detect();\
+        let f = |cs: Vec<CoreId>| rayon::ThreadPoolBuilder::new().num_threads(cs.len().max(1)).start_handler(move |id| \{ if id < cs.len() \{ set_for_current(cs[id]); \} \}).build().unwrap();\
+        Ok(Self \{ s: AlignedStorage::new(size)?, pp: f(caps.pc.clone()), ep: f(caps.ec.clone()), c: caps \})\
+    \}\
+    pub fn execute(&mut self, op: OperationType) \{\
+        let d = unsafe \{ std::slice::from_raw_parts_mut(self.s.ptr, self.s.size) \};\
+        let split_idx = if op == OperationType::MatrixMatrix \{ (d.len() * 2) / 3 \} else \{ d.len() \};\
+        let (p_d, e_d) = d.split_at_mut(split_idx);\
+        rayon::scope(|s| \{\
+            s.spawn(|_| self.pp.install(|| p_d.par_chunks_mut(self.c.l3).for_each(|c| unsafe \{ self.crc(c); self.dispatch(c, op); \})));\
+            s.spawn(|_| self.ep.install(|| e_d.par_chunks_mut(self.c.l2).for_each(|c| unsafe \{ self.crc(c); self.dispatch(c, OperationType::LinearLogic); \})));\
+        \});\
+    \}\
+    pub fn zero_copy<T>(&self, o: usize) -> Option<&mut T> \{ (o + sz::<T>() <= self.s.size).then(|| unsafe \{ mem::transmute(self.s.ptr.add(o)) \}) \}\
+    unsafe fn crc(&self, c: &[u8]) -> u32 \{\
+        let mut r = !0u32;\
+        #[cfg(target_arch="x86_64")] if is_x86_feature_detected!("sse4.2") \{ for &b in c \{ r = _mm_crc32_u8(r, b); \} return !r; \}\
+        #[cfg(target_arch="aarch64")] \{ for &b in c \{ asm!("crc32b \{0:w\}, \{0:w\}, \{1:w\}", inout(reg) r, in(reg) b); \} return !r; \}\
+        c.iter().fold(!0, |a, &b| a ^ b as u32)\
+    \}\
+    unsafe fn pref(&self, p: *const u8, l: usize) \{ for i in (0..l).step_by(64) \{ #[cfg(target_arch="x86_64")] _mm_prefetch(p.add(i) as _, _MM_HINT_T0); #[cfg(target_arch="aarch64")] asm!("prfm pldl1keep, [\{0\}]", in(reg) p.add(i)); \} \}\
+    unsafe fn dispatch(&self, c: &mut [u8], op: OperationType) \{\
+        self.pref(c.as_ptr(), 512.min(c.len()));\
+        match op \{\
+            OperationType::MatrixMatrix if self.c.has_amx => self.run_amx(c),\
+            #[cfg(target_arch="aarch64")] OperationType::MatrixMatrix => self.run_sme(c),\
+            _ if self.c.has_vnni => self.run_vnni(c),\
+            _ if self.c.has_a512 => self.run_a512(c),\
+            _ => c.iter_mut().for_each(|b| *b = !*b),\
+        \}\
+    \}\
+    #[target_feature(enable="amx-tile,amx-int8")] unsafe fn run_amx(&self, c: &mut [u8]) \{\
+        let p = c.as_mut_ptr(); for o in (0..c.len()).step_by(8192) \{\
+            if o+8192 > c.len() \{ break; \} let cp = p.add(o); let cfg = TileConfig \{ p_id: 1, s_row: 0, res: [0; 14], colsb: [64; 16], rows: [if o+16384 <= c.len() \{ 16 \} else \{ 8 \}; 16] \};\
+            self.pref(cp.add(8192), 1024); asm!("ldtilecfg [\{0\}]", "tileloadd tmm0, [\{1\}+64]", "tileloadd tmm1, [\{2\}+64]", "tileloadd tmm2, [\{3\}+64]", "tileloadd tmm3, [\{4\}+64]", "tdpbusd tmm4, tmm0, tmm2", "tdpbusd tmm5, tmm1, tmm3", "tilestored [\{5\}+64], tmm4", "tilestored [\{6\}+64], tmm5", "tilerelease", in(reg) &cfg, in(reg) cp, in(reg) cp.add(1024), in(reg) cp.add(2048), in(reg) cp.add(3072), in(reg) cp.add(4096), in(reg) cp.add(5120));\
+        \}\
+    \}\
+    #[cfg(target_arch="aarch64")] unsafe fn run_sme(&self, c: &mut [u8]) \{\
+        let p = c.as_mut_ptr(); for o in (0..c.len()).step_by(1024) \{\
+            if o+1024 > c.len() \{ break; \} let cp = p.add(o); self.pref(cp.add(1024), 512);\
+            asm!("smstart", "zero \{\{za\}\}", "ptrue p0.b", "ld1b \{\{z0.b\}\}, p0/z, [x0]", "ld1b \{\{z1.b\}\}, p0/z, [x1]", "fmopa za0.s, p0/m, p0/m, z0.s, z1.s", "st1b \{\{z0.b\}\}, p0, [x2]", "smstop", in("x0") cp, in("x1") cp.add(256), in("x2") cp.add(512));\
+        \}\
+    \}\
+    unsafe fn run_vnni(&self, c: &mut [u8]) \{ let b = _mm512_set1_epi8(1); for x in c.chunks_exact_mut(256) \{ let p = x.as_mut_ptr(); self.pref(p.add(256), 64); for i in 0..4 \{ let off = i*64; _mm512_store_si512(p.add(off) as _, _mm512_dpbusd_epi32(_mm512_setzero_si512(), _mm512_load_si512(p.add(off) as _), b)); \} \} \}\
+    unsafe fn run_a512(&self, c: &mut [u8]) \{ let m = _mm512_set1_epi64(-1); for x in c.chunks_exact_mut(128) \{ let p = x.as_mut_ptr(); self.pref(p.add(128), 64); _mm512_store_si512(p as _, _mm512_xor_si512(_mm512_load_si512(p as _), m)); _mm512_store_si512(p.add(64) as _, _mm512_xor_si512(_mm512_load_si512(p.add(64) as _), m)); \} \}\
+\}\
+}

@@ -1,0 +1,252 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 #![no_std]\
+#![no_main]\
+#![feature(abi_x86_interrupt)]\
+#![feature(alloc_error_handler)]\
+\
+use core::arch::asm;\
+use core::ptr::\{write_volatile, read_volatile\};\
+use core::sync::atomic::\{AtomicUsize, Ordering, AtomicU32, AtomicU64\};\
+\
+static AVG_LATENCY: AtomicU64 = AtomicU64::new(0);\
+static CORE_WEAR: [AtomicU64; 256] = unsafe \{ core::mem::transmute([0u64; 256]) \};\
+static CORE_STRIKES: [AtomicU32; 256] = unsafe \{ core::mem::transmute([0u32; 256]) \};\
+static CORE_REHAB_TIMER: [AtomicU64; 256] = unsafe \{ core::mem::transmute([0u64; 256]) \};\
+static CYCLE_COUNTER: AtomicU64 = AtomicU64::new(0);\
+static SCRUB_PTR: AtomicUsize = AtomicUsize::new(0x40000000);\
+static BLACK_BOX_PTR: AtomicUsize = AtomicUsize::new(0x2000000); \
+static mut IS_VIRTUAL: bool = false;\
+static mut FRAMEBUFFER: *mut u32 = 0xFD000000 as *mut u32;\
+static LAST_SCANCODE: AtomicU32 = AtomicU32::new(0);\
+static GPU_BAR_ADDR: AtomicUsize = AtomicUsize::new(0xFD000000);\
+static NET_BAR_ADDR: AtomicUsize = AtomicUsize::new(0);\
+static DMA_READY: AtomicU32 = AtomicU32::new(0);\
+static HEAP_PTR: AtomicUsize = AtomicUsize::new(0x8000000);\
+\
+#[repr(C, align(4096))]\
+struct PageTable([u64; 512]);\
+\
+static mut PML4: PageTable = PageTable([0; 512]);\
+static mut PDP: PageTable = PageTable([0; 512]);\
+static mut PD: PageTable = PageTable([0; 512]);\
+\
+#[repr(C, packed)]\
+struct IdtEntry \{ offset_low: u16, selector: u16, ist: u8, types_attr: u8, offset_mid: u16, offset_high: u32, zero: u32 \}\
+#[repr(C, packed)]\
+struct IdtPtr \{ limit: u16, base: u64 \}\
+#[repr(C, packed)]\
+struct GdtEntry \{ limit_low: u16, base_low: u16, base_mid: u8, access: u8, granularity: u8, base_high: u8 \}\
+#[repr(C, packed)]\
+struct GdtPtr \{ limit: u16, base: u64 \}\
+\
+static mut IDT: [IdtEntry; 256] = unsafe \{ core::mem::transmute([0u8; 256 * 16]) \};\
+static mut GDT: [GdtEntry; 5] = [\
+    GdtEntry \{ limit_low: 0, base_low: 0, base_mid: 0, access: 0, granularity: 0, base_high: 0 \},\
+    GdtEntry \{ limit_low: 0xFFFF, base_low: 0, base_mid: 0, access: 0x9A, granularity: 0xAF, base_high: 0 \},\
+    GdtEntry \{ limit_low: 0xFFFF, base_low: 0, base_mid: 0, access: 0x92, granularity: 0xCF, base_high: 0 \},\
+    GdtEntry \{ limit_low: 0xFFFF, base_low: 0, base_mid: 0, access: 0xFA, granularity: 0xAF, base_high: 0 \},\
+    GdtEntry \{ limit_low: 0xFFFF, base_low: 0, base_mid: 0, access: 0xF2, granularity: 0xCF, base_high: 0 \},\
+];\
+\
+pub enum MirrorState \{ Citadel, Aether \}\
+pub struct Process \{ pub id: u32, pub rip: u64, pub rsp: u64, pub state: u8 \}\
+\
+pub struct AetherAPI;\
+impl AetherAPI \{\
+    pub unsafe fn dispatch(call_id: u32, arg1: u64, arg2: u64) -> u64 \{\
+        match call_id \{\
+            0x01 => \{ AetherGPU::fast_blit(arg1 as *const u32, arg2 as usize); 1 \}\
+            0x02 => \{ HEAP_PTR.fetch_add(arg1 as usize, Ordering::SeqCst) as u64 \}\
+            0x03 => \{ LAST_SCANCODE.load(Ordering::Relaxed) as u64 \}\
+            0x04 => \{ if NET_BAR_ADDR.load(Ordering::Acquire) != 0 \{ 1 \} else \{ 0 \} \}\
+            _ => 0\
+        \}\
+    \}\
+\}\
+\
+pub struct PCIBus;\
+impl PCIBus \{\
+    unsafe fn read_config(bus: u8, slot: u8, func: u8, offset: u8) -> u32 \{\
+        let address = ((bus as u32) << 16) | ((slot as u32) << 11) | ((func as u32) << 8) | (offset as u32 & 0xFC) | 0x80000000;\
+        CitadelIO::outl(0xCF8, address);\
+        CitadelIO::inl(0xCFC)\
+    \}\
+    pub unsafe fn probe_devices() \{\
+        for bus in 0..255 \{\
+            for slot in 0..32 \{\
+                let val = Self::read_config(bus, slot, 0, 0);\
+                if val != 0xFFFFFFFF \{\
+                    let class_rev = Self::read_config(bus, slot, 0, 0x08);\
+                    let class = (class_rev >> 16) as u16;\
+                    if class == 0x0300 \{\
+                        let bar = Self::read_config(bus, slot, 0, 0x10);\
+                        GPU_BAR_ADDR.store(bar as usize & !0xF, Ordering::Release);\
+                        DMA_READY.store(1, Ordering::Release);\
+                    \} else if class == 0x0200 \{\
+                        let bar = Self::read_config(bus, slot, 0, 0x10);\
+                        NET_BAR_ADDR.store(bar as usize & !0xF, Ordering::Release);\
+                    \}\
+                \}\
+            \}\
+        \}\
+    \}\
+\}\
+\
+pub struct AetherGPU;\
+impl AetherGPU \{\
+    pub unsafe fn fast_blit(src: *const u32, count: usize) \{\
+        if DMA_READY.load(Ordering::Acquire) == 1 \{\
+            let dest = GPU_BAR_ADDR.load(Ordering::Acquire) as *mut u32;\
+            for i in (0..count).step_by(4) \{\
+                asm!("movups xmm0, [\{src\}]", "movntps [\{dst\}], xmm0", src = in(reg) src.add(i), dst = in(reg) dest.add(i));\
+            \}\
+        \}\
+    \}\
+    pub unsafe fn clear(color: u32) \{\
+        let fb = FRAMEBUFFER;\
+        for i in 0..(1920 * 1080) \{ write_volatile(fb.add(i), color); \}\
+    \}\
+\}\
+\
+pub struct MemoryManager;\
+impl MemoryManager \{\
+    pub unsafe fn init_paging() \{\
+        PML4.0[0] = (&PDP as *const _ as u64) | 0x03;\
+        PDP.0[0] = (&PD as *const _ as u64) | 0x03;\
+        for i in 0..512 \{ PD.0[i] = (i as u64 * 0x200000) | 0x83; \}\
+        asm!("mov cr3, \{\}", in(reg) &PML4 as *const _);\
+    \}\
+\}\
+\
+pub struct UdaOmnis \{ pub t_pulse_base: u64, pub core_count: u32, pub migration_threshold: u64, pub strike_limit: u32, pub rehab_threshold: u64 \}\
+impl UdaOmnis \{\
+    pub unsafe fn execute<F>(&self, mut f: F) -> Result<u64, ()> where F: FnMut() + Clone \{\
+        let target_core = self.select_optimal_core();\
+        let strikes = CORE_STRIKES[target_core as usize].load(Ordering::Relaxed);\
+        let state = if strikes > 1 \{ MirrorState::Citadel \} else \{ MirrorState::Aether \};\
+        match state \{\
+            MirrorState::Citadel => \{\
+                let limit = (AVG_LATENCY.load(Ordering::Acquire) * 135) / 100 + self.t_pulse_base;\
+                let v1 = self.run_isolated(f.clone(), limit);\
+                let v2 = self.run_isolated(f.clone(), limit);\
+                let v3 = self.run_isolated(f, limit);\
+                if let Ok(elapsed) = self.consensus_soft(v1, v2, v3) \{\
+                    self.post_process(target_core, elapsed, true);\
+                    Ok(elapsed)\
+                \} else \{\
+                    CORE_STRIKES[target_core as usize].fetch_add(1, Ordering::SeqCst);\
+                    Err(())\
+                \}\
+            \}\
+            MirrorState::Aether => \{\
+                let t0 = _rdtsc(); f(); let d = _rdtsc().wrapping_sub(t0);\
+                self.post_process(target_core, (d * 66) / 100, false);\
+                Ok(d)\
+            \}\
+        \}\
+    \}\
+    fn select_optimal_core(&self) -> u32 \{\
+        let mut best = 0; let mut min_w = u64::MAX;\
+        for i in 0..self.core_count \{\
+            let w = CORE_WEAR[i as usize].load(Ordering::Relaxed);\
+            if w < min_w \{ min_w = w; best = i; \}\
+        \}\
+        best\
+    \}\
+    fn consensus_soft(&self, a: u64, b: u64, c: u64) -> Result<u64, ()> \{\
+        let t = (a / 40).max(3);\
+        if a != u64::MAX && (a.abs_diff(b) <= t || a.abs_diff(c) <= t) \{ Ok(a) \} else \{ Err(()) \}\
+    \}\
+    unsafe fn run_isolated<F>(&self, mut f: F, limit: u64) -> u64 where F: FnMut() \{\
+        let t0 = _rdtsc(); f(); let d = _rdtsc().wrapping_sub(t0);\
+        if d > limit \{ u64::MAX \} else \{ d \}\
+    \}\
+    unsafe fn post_process(&self, core_id: u32, elapsed: u64, secure: bool) \{\
+        if secure \{ CORE_WEAR[core_id as usize].fetch_add(elapsed, Ordering::Relaxed); \}\
+        let old = AVG_LATENCY.load(Ordering::Acquire);\
+        AVG_LATENCY.store((old * 1023 + elapsed) / 1024, Ordering::Release);\
+        CYCLE_COUNTER.fetch_add(1, Ordering::SeqCst);\
+    \}\
+\}\
+\
+pub struct CitadelIO;\
+impl CitadelIO \{\
+    pub unsafe fn outb(port: u16, val: u8) \{ asm!("out dx, al", in("dx") port, in("al") val); \}\
+    pub unsafe fn inb(port: u16) -> u8 \{ let val: u8; asm!("in al, dx", out("al") val, in("dx") port); val \}\
+    pub unsafe fn outl(port: u16, val: u32) \{ asm!("out dx, eax", in("dx") port, in("eax") val); \}\
+    pub unsafe fn inl(port: u16) -> u32 \{ let val: u32; asm!("in eax, dx", out("eax") val, in("dx") port); val \}\
+    pub unsafe fn serial_init() \{ Self::outb(0x3F8+1, 0); Self::outb(0x3F8+3, 0x80); Self::outb(0x3F8+0, 3); Self::outb(0x3F8+3, 3); \}\
+\}\
+\
+pub struct SovereignKernel \{ pub omnis: UdaOmnis, pub scheduler: [Option<Process>; 32] \}\
+impl SovereignKernel \{\
+    pub unsafe fn main_loop(&mut self) -> ! \{\
+        CitadelIO::serial_init();\
+        PCIBus::probe_devices();\
+        MemoryManager::init_paging();\
+        self.init_gdt();\
+        self.init_idt();\
+        asm!("sti");\
+        loop \{\
+            for proc in self.scheduler.iter_mut().flatten() \{\
+                let _ = self.omnis.execute(|| \{ proc.enter_user_mode(); \});\
+            \}\
+            asm!("hlt");\
+        \}\
+    \}\
+    unsafe fn init_gdt(&self) \{\
+        let ptr = GdtPtr \{ limit: 39, base: GDT.as_ptr() as u64 \};\
+        asm!("lgdt [\{\}]", "push 0x08", "lea rax, [rip + 1f]", "push rax", "retfq", "1:", "mov ax, 0x10", "mov ds, ax", "mov ss, ax", in(reg) &ptr);\
+    \}\
+    unsafe fn init_idt(&mut self) \{\
+        let h = Self::syscall_handler as u64;\
+        for i in 0..256 \{ IDT[i] = IdtEntry \{ offset_low: h as u16, selector: 0x08, ist: 0, types_attr: 0x8E, offset_mid: (h >> 16) as u16, offset_high: (h >> 32) as u32, zero: 0 \}; \}\
+        let ptr = IdtPtr \{ limit: 4095, base: IDT.as_ptr() as u64 \};\
+        asm!("lidt [\{\}]", in(reg) &ptr);\
+    \}\
+    extern "x86-interrupt" fn syscall_handler() \{\
+        let (rax, rdi, rsi): (u64, u64, u64);\
+        unsafe \{\
+            asm!("mov \{0\}, rax", "mov \{1\}, rdi", "mov \{2\}, rsi", out(reg) rax, out(reg) rdi, out(reg) rsi);\
+            let res = AetherAPI::dispatch(rax as u32, rdi, rsi);\
+            asm!("mov rax, \{0\}", in(reg) res);\
+            CitadelIO::outb(0x20, 0x20);\
+        \}\
+    \}\
+\}\
+\
+impl Process \{\
+    pub unsafe fn enter_user_mode(&self) \{\
+        asm!("push 0x23", "push \{rsp\}", "push 0x202", "push 0x1B", "push \{rip\}", "iretq", rsp = in(reg) self.rsp, rip = in(reg) self.rip);\
+    \}\
+\}\
+\
+pub struct BlackBox;\
+impl BlackBox \{\
+    pub fn log(code: u32, data: u64) \{\
+        let addr = (BLACK_BOX_PTR.load(Ordering::Acquire) + ((CYCLE_COUNTER.load(Ordering::Relaxed) % 1024) as usize * 16)) as *mut u64;\
+        unsafe \{ write_volatile(addr, code as u64); write_volatile(addr.add(1), data); \}\
+    \}\
+\}\
+\
+#[no_mangle] pub unsafe extern "C" fn _start() -> ! \{\
+    let mut eax: u32; asm!("cpuid", inout("eax") 0x01 => eax, out("ebx") _, out("ecx") _, out("edx") _);\
+    if (eax >> 31) & 1 == 1 \{ IS_VIRTUAL = true; \}\
+    asm!("mov rax, cr4", "or rax, 0x600", "mov cr4, rax");\
+    let mut kernel = SovereignKernel \{\
+        omnis: UdaOmnis \{ t_pulse_base: 5000, core_count: 16, migration_threshold: 1000, strike_limit: 10, rehab_threshold: 1000000 \},\
+        scheduler: [Option::None; 32],\
+    \};\
+    AetherGPU::clear(0);\
+    kernel.main_loop();\
+\}\
+\
+#[panic_handler] fn panic(_: &core::panic::PanicInfo) -> ! \{ BlackBox::log(0xDEADBEEF, 0); loop \{ unsafe \{ asm!("hlt"); \} \} \}\
+#[inline(always)] fn _rdtsc() -> u64 \{ let (rax, rdx): (u64, u64); unsafe \{ asm!("rdtsc", out("rax") rax, out("rdx") rdx); \} (rdx << 32) | rax \}\
+}

@@ -1,0 +1,163 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 #![no_std]\
+#![feature(abi_x86_interrupt)]\
+\
+use core::arch::asm;\
+use core::arch::x86_64::\{_mm_lfence, _mm_prefetch, _rdtsc, lidt, lgdt, _MM_HINT_T0\};\
+use core::hint::black_box;\
+use core::sync::atomic::\{compiler_fence, Ordering\};\
+\
+const APIC_LVT_PERF: *mut u32 = 0xFEE0_0340 as *mut u32;\
+const APIC_TMR_INITCNT: *mut u32 = 0xFEE0_0380 as *mut u32;\
+\
+#[repr(C, packed)]\
+struct DescriptorTablePointer \{\
+    limit: u16,\
+    base: u64,\
+\}\
+\
+#[repr(C, align(16))]\
+struct IdtEntry \{\
+    offset_low: u16,\
+    selector: u16,\
+    ist_res: u8,\
+    flags: u8,\
+    offset_mid: u16,\
+    offset_high: u32,\
+    reserved: u32,\
+\}\
+\
+#[repr(C, packed)]\
+pub struct Tss \{\
+    reserved_0: u32,\
+    pub rsp: [u64; 3],\
+    reserved_1: u64,\
+    pub ist: [u64; 7],\
+    reserved_2: u64,\
+    reserved_3: u16,\
+    pub iomap_base: u16,\
+\}\
+\
+#[repr(C, align(16))]\
+struct Gdt \{\
+    null: u64,\
+    kernel_code: u64,\
+    tss_low: u64,\
+    tss_high: u64,\
+\}\
+\
+static mut IDT: [IdtEntry; 256] = [IdtEntry::zero(); 256];\
+static mut TSS: Tss = unsafe \{ core::mem::zeroed() \};\
+static mut GDT: Gdt = Gdt::new();\
+static mut NMI_STACK: [u8; 4096] = [0; 4096];\
+\
+impl IdtEntry \{\
+    const fn zero() -> Self \{\
+        Self \{ offset_low: 0, selector: 0, ist_res: 0, flags: 0, offset_mid: 0, offset_high: 0, reserved: 0 \}\
+    \}\
+\
+    fn set_handler(&mut self, handler: *const u8) \{\
+        let addr = handler as u64;\
+        self.offset_low = addr as u16;\
+        self.offset_mid = (addr >> 16) as u16;\
+        self.offset_high = (addr >> 32) as u32;\
+        self.selector = 8;\
+        self.ist_res = 1;\
+        self.flags = 0x8E;\
+    \}\
+\}\
+\
+impl Gdt \{\
+    const fn new() -> Self \{\
+        Self \{ null: 0, kernel_code: 0x00AF_9A00_0000_FFFF, tss_low: 0, tss_high: 0 \}\
+    \}\
+\}\
+\
+#[no_mangle]\
+pub unsafe extern "x86-interrupt" fn nmi_handler(_frame: *mut u8) \{\
+    asm!("cli", "hlt");\
+\}\
+\
+pub unsafe fn init_system() \{\
+    let stack_top = NMI_STACK.as_ptr() as u64 + 4096;\
+    TSS.ist[0] = stack_top;\
+\
+    let tss_addr = &TSS as *const _ as u64;\
+    let limit = (core::mem::size_of::<Tss>() - 1) as u64;\
+    GDT.tss_low = (limit & 0xFFFF) | ((tss_addr & 0xFFFFFF) << 16) | (0x89 << 40) | ((tss_addr >> 24) & 0xFF) << 56;\
+    GDT.tss_high = tss_addr >> 32;\
+\
+    lgdt(&DescriptorTablePointer \{ limit: 31, base: &GDT as *const _ as u64 \});\
+    asm!("ltr \{0:x\}", in(reg) 0x10u16);\
+\
+    IDT[2].set_handler(nmi_handler as *const u8);\
+    lidt(&DescriptorTablePointer \{ limit: 4095, base: &IDT as *const _ as u64 \});\
+\}\
+\
+pub struct UdaSingularity \{\
+    pub t_pulse: u64,\
+\}\
+\
+impl UdaSingularity \{\
+    unsafe fn arm(&self) \{\
+        core::ptr::write_volatile(APIC_LVT_PERF, 0x400);\
+        core::ptr::write_volatile(APIC_TMR_INITCNT, (self.t_pulse * 10) as u32);\
+    \}\
+\
+    unsafe fn disarm(&self) \{\
+        core::ptr::write_volatile(APIC_TMR_INITCNT, 0);\
+    \}\
+\
+    #[inline(always)]\
+    unsafe fn warm_up<F>(&self, mut f: F) \
+    where F: FnMut() \{\
+        let f_ptr = &f as *const _ as *const u8;\
+        for i in (0..128).step_by(64) \{\
+            _mm_prefetch(f_ptr.add(i), _MM_HINT_T0);\
+        \}\
+        _mm_lfence();\
+        for _ in 0..3 \{\
+            black_box(f());\
+        \}\
+        _mm_lfence();\
+    \}\
+\
+    pub unsafe fn execute<F>(&self, mut f: F) -> u64 \
+    where F: FnMut() \{\
+        self.warm_up(&mut f);\
+        self.arm();\
+        asm!("cli");\
+        asm!(".p2align 6");\
+\
+        loop \{\
+            asm!("serialize", options(nosync, nostack));\
+            let t0 = _rdtsc();\
+            \
+            compiler_fence(Ordering::SeqCst);\
+            _mm_lfence();\
+            black_box(f());\
+            _mm_lfence();\
+            compiler_fence(Ordering::SeqCst);\
+\
+            let t1 = _rdtsc();\
+            asm!("serialize", options(nosync, nostack));\
+\
+            let elapsed = t1.wrapping_sub(t0);\
+            if elapsed <= self.t_pulse \{\
+                asm!("sti");\
+                self.disarm();\
+                return elapsed;\
+            \}\
+\
+            let target = _rdtsc() + 5000;\
+            asm!("tpause \{0\}", in(reg) 1u32, in("eax") target as u32, in("edx") (target >> 32) as u32);\
+        \}\
+    \}\
+\}\
+}

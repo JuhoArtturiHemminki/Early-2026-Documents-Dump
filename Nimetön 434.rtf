@@ -1,0 +1,271 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 use rusqlite::\{params, Connection, Result\};\
+use serde::\{Serialize, Deserialize\};\
+use std::sync::\{Arc, RwLock\};\
+use lru::LruCache;\
+use std::num::NonZeroUsize;\
+use zstd::stream::\{encode_all, decode_all\};\
+use sysinfo::System; // V21.6: Hardware-aware scaling engine\
+use bloomfilter::Bloom; // High-precision probabilistic filter\
+use std::time::\{SystemTime, UNIX_EPOCH\};\
+use std::io::\{self, Write\};\
+\
+/// --- 1. ARCHITECTURAL DYNAMIC RATIOS (UNIVERSAL V21.19) ---\
+/// Optimizes resource allocation based on 10% of host system RAM.\
+const TOTAL_RAM_USAGE_RATIO: f64 = 0.10; \
+const BLOOM_RAM_PORTION: f64 = 0.20;     \
+const CACHE_RAM_PORTION: f64 = 0.80;     \
+\
+/// --- 2. ONTOLOGICAL DATA STRUCTURE (V21.18 - V21.19) ---\
+#[derive(Clone, Debug, Serialize, Deserialize)]\
+struct Fact \{\
+    content: String,\
+    confidence: f32,      \
+    source_reliability: f32,\
+    risk_level: f32,      \
+    timestamp: u64,\
+    // V21.18: Taxonomy metadata for hierarchical logic\
+    level: u8,            // 1: Root, 2: Category, 3: Instance, 4: Link/Link-Node\
+    parent: Option<String>, \
+\}\
+\
+pub struct OmniCoreV21_19 \{\
+    lru_cache: Arc<RwLock<LruCache<String, Fact>>>,\
+    bloom_filter: Arc<RwLock<Bloom<String>>>, \
+    db_conn: Arc<RwLock<Connection>>,\
+    system_report: String,\
+    history_logging_enabled: Arc<RwLock<bool>>, // V21.15: Privacy toggle\
+\}\
+\
+impl OmniCoreV21_19 \{\
+    /// --- V21.19: THE UNIVERSAL ADAPTIVE INITIALIZER ---\
+    /// Scans hardware and initializes the Sovereign Setup Wizard.\
+    pub fn new(path: &str) -> Result<Self> \{\
+        let mut sys = System::new_all();\
+        sys.refresh_memory();\
+        let total_ram_kb = sys.total_memory();\
+        \
+        // A. HARDWARE SCALING: 10% RAM Budgeting\
+        let omnicore_ram_kb = (total_ram_kb as f64 * TOTAL_RAM_USAGE_RATIO) as u64;\
+        let bloom_ram_kb = (omnicore_ram_kb as f64 * BLOOM_RAM_PORTION) as usize;\
+        let dynamic_bloom_capacity = (bloom_ram_kb * 8 * 1024) / 15; \
+        \
+        let cache_ram_kb = (omnicore_ram_kb as f64 * CACHE_RAM_PORTION) as usize;\
+        let dynamic_cache_size = (cache_ram_kb / 2).max(1000);\
+\
+        // B. DATABASE ENGINE: WAL-mode for speed and stability\
+        let conn = Connection::open(path)?;\
+        conn.pragma_update(None, "journal_mode", "WAL")?;\
+        conn.pragma_update(None, "synchronous", "NORMAL")?;\
+        conn.execute("CREATE TABLE IF NOT EXISTS neural_vault (subject TEXT PRIMARY KEY, data BLOB)", [])?;\
+\
+        let is_empty: i64 = conn.query_row("SELECT count(*) FROM neural_vault", [], |r| r.get(0))?;\
+\
+        let core = Self \{\
+            lru_cache: Arc::new(RwLock::new(LruCache::new(NonZeroUsize::new(dynamic_cache_size).unwrap()))),\
+            bloom_filter: Arc::new(RwLock::new(Bloom::new_for_fp_rate(dynamic_bloom_capacity, 0.001))),\
+            db_conn: Arc::new(RwLock::new(conn)),\
+            system_report: format!(\
+                "OmniCore V21.19 | RAM: \{\}MB | Bloom: \{\}M items | Items in Vault: \{\}", \
+                omnicore_ram_kb / 1024, (dynamic_bloom_capacity / 1_000_000), is_empty\
+            ),\
+            history_logging_enabled: Arc::new(RwLock::new(false)),\
+        \};\
+\
+        // C. FIRST-RUN DETECTION: Activates the Ontological Setup Wizard\
+        if is_empty == 0 \{\
+            core.run_setup_wizard()?;\
+        \}\
+\
+        Ok(core)\
+    \}\
+\
+    /// --- V21.19: ONTOLOGICAL SETUP WIZARD ---\
+    /// Interactively asks for core knowledge seeding and privacy settings.\
+    fn run_setup_wizard(&self) -> Result<()> \{\
+        println!("\\x1b[1;36m--- OMNICORE SOVEREIGN SETUP (V21.19) ---\\x1b[0m");\
+\
+        // STAGE 1: MASSIVE ONTOLOGICAL SEED\
+        println!("1. Load Universal Ontological Seed Package?");\
+        println!("\\x1b[0;37m   (Root Nodes: Physics, History, Biology, Philosophy, Logic, Mathematics)\\x1b[0m");\
+        print!("Selection (Y/N): ");\
+        io::stdout().flush().unwrap();\
+        let mut seed_input = String::new();\
+        io::stdin().read_line(&mut seed_input).unwrap();\
+        \
+        if seed_input.trim().to_uppercase() == "Y" \{\
+            let ontological_seed = vec![\
+                ("Physics", "Root: Fundamental laws of the material universe.", 1, None),\
+                ("History", "Root: Chronological record of human events and causality.", 1, None),\
+                ("Biology", "Root: Study of life, organisms, and organic structures.", 1, None),\
+                ("Philosophy", "Root: Investigation of existence, knowledge, and ethics.", 1, None),\
+                ("Logic", "Root: Principles of valid inference and formal reasoning.", 1, None),\
+                ("Mathematics", "Root: Formal systems of numbers and abstract structures.", 1, None),\
+                // Level 2 Categories (Ontological Bridges)\
+                ("Genetics", "Category: Science of heredity and DNA variation.", 2, Some("Biology")),\
+                ("Epistemology", "Category: Theory of knowledge and justification.", 2, Some("Philosophy")),\
+                ("Chronology", "Category: Arranging events in order of occurrence.", 2, Some("History")),\
+                ("Thermodynamics", "Category: Physics of heat and energy transfer.", 2, Some("Physics")),\
+                ("Informatics", "Category: Processing and storage of structured data.", 2, Some("Logic")),\
+            ];\
+            self.dynamic_taxonomic_seed(ontological_seed)?;\
+        \}\
+\
+        // STAGE 2: PRIVACY & RECALL (V21.15 - V21.17)\
+        println!("2. Enable Intent-Aware Conversation History logging?");\
+        println!("\\x1b[0;37m   (Recall activates only when referring to past actions, e.g., 'What did I say earlier?')\\x1b[0m");\
+        print!("Selection (Y/N): ");\
+        io::stdout().flush().unwrap();\
+        let mut history_input = String::new();\
+        io::stdin().read_line(&mut history_input).unwrap();\
+        if history_input.trim().to_uppercase() == "Y" \{\
+            let mut enabled = self.history_logging_enabled.write().unwrap();\
+            *enabled = true;\
+            println!("\\x1b[1;32m[HISTORY]: Active. Intent-Aware Memory established.\\x1b[0m");\
+        \}\
+        \
+        Ok(())\
+    \}\
+\
+    /// --- V21.11: DYNAMIC TAXONOMIC SEEDER ---\
+    /// Performs high-speed atomic transactions for massive data ingestion.\
+    pub fn dynamic_taxonomic_seed(&self, data: Vec<(&str, &str, u8, Option<&str>)>) -> Result<()> \{\
+        let mut conn = self.db_conn.write().unwrap();\
+        let tx = conn.transaction()?; \
+        \{\
+            let mut bloom = self.bloom_filter.write().unwrap();\
+            for (subj, cont, lvl, parent) in data \{\
+                let key = subj.to_lowercase();\
+                let fact = Fact \{\
+                    content: cont.to_string(),\
+                    confidence: 1.0,\
+                    source_reliability: 1.0,\
+                    risk_level: 0.0,\
+                    timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),\
+                    level: lvl,\
+                    parent: parent.map(|s| s.to_lowercase()),\
+                \};\
+                bloom.set(&key);\
+                let serialized = serde_json::to_vec(&fact).unwrap();\
+                let compressed = encode_all(&serialized[..], 3).unwrap();\
+                tx.execute("INSERT OR REPLACE INTO neural_vault (subject, data) VALUES (?1, ?2)", params![key, compressed])?;\
+            \}\
+        \}\
+        tx.commit()?;\
+        println!("\\x1b[1;32m[SUCCESS]: Ontological Seed committed to Neural Vault.\\x1b[0m");\
+        Ok(())\
+    \}\
+\
+    /// --- V21.17: INTENT-AWARE PROCESSOR ---\
+    /// Handles Story Mode, Recall Triggers, and Privacy Logging.\
+    pub fn process(&self, input: &str) -> String \{\
+        let input_lower = input.to_lowercase();\
+        let logging_on = *self.history_logging_enabled.read().unwrap();\
+\
+        // 1. RECALL TRIGGER: Only if both Temporal and Action intent are present\
+        if logging_on && self.has_recall_intent(&input_lower) \{\
+            return self.recall_history();\
+        \}\
+\
+        // 2. STORY MODE: Fiction Isolation Layer + Semantic Purge (V21.10)\
+        if input_lower.contains("story") || input_lower.contains("tarina") || input_lower.contains("imagine") \{\
+            let raw = format!("The horizon fractured. \{\}", input.replace("Write a story", ""));\
+            return self.apply_immersion_filter(raw);\
+        \}\
+\
+        // 3. PRIVACY LOGGING: Silent save to history if permitted\
+        if logging_on \{\
+            let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();\
+            self.learn(&format!("hist_\{\}", timestamp), input, 3, None); \
+        \}\
+\
+        self.answer(input)\
+    \}\
+\
+    fn has_recall_intent(&self, input: &str) -> bool \{\
+        let temporal = input.contains("viimeksi") || input.contains("aiemmin") || input.contains("last time") || input.contains("previously");\
+        let action = input.contains("kysyin") || input.contains("sanoin") || input.contains("said") || input.contains("asked") || input.contains("mentioned");\
+        temporal && action\
+    \}\
+\
+    fn apply_immersion_filter(&self, text: String) -> String \{\
+        let banned = vec!["OmniCore", "V21.19", "ERA", "Sovereign", "Vault"];\
+        let mut clean = text;\
+        for term in banned \{ clean = clean.replace(term, "the core logic"); \}\
+        clean.replace("[SIMULATION]", "").trim().to_string()\
+    \}\
+\
+    /// --- 4. SOVEREIGN RETRIEVAL WITH TAXONOMY ---\
+    pub fn answer(&self, subject: &str) -> String \{\
+        let key = subject.to_lowercase();\
+        // High-Precision Bloom Check\
+        if !self.bloom_filter.read().unwrap().check(&key) \{\
+            return format!("[ERA_REJECTED]: Concept '\{\}' unknown to the Vault.", subject);\
+        \}\
+\
+        let db = self.db_conn.read().unwrap();\
+        let mut stmt = db.prepare("SELECT data FROM neural_vault WHERE subject = ?1").unwrap();\
+        let result = stmt.query_row(params![key], |row| \{\
+            let compressed: Vec<u8> = row.get(0)?;\
+            let decompressed = decode_all(&compressed[..]).unwrap();\
+            let f: Fact = serde_json::from_slice(&decompressed).unwrap();\
+            Ok(f)\
+        \});\
+\
+        match result \{\
+            Ok(f) => \{\
+                let p_info = f.parent.map_or("".to_string(), |p| format!(" (Belongs to: \{\})", p));\
+                format!("[LVL_\{\}]: \{\}\{\}", f.level, f.content, p_info)\
+            \},\
+            Err(_) => "[ERROR]: Neural Vault integrity mismatch.".to_string(),\
+        \}\
+    \}\
+\
+    pub fn learn(&self, subject: &str, info: &str, level: u8, parent: Option<String>) \{\
+        let key = subject.to_lowercase();\
+        let fact = Fact \{ \
+            content: info.to_string(), confidence: 1.0, source_reliability: 1.0, \
+            risk_level: 0.0, timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),\
+            level, parent \
+        \};\
+        \{\
+            let mut bloom = self.bloom_filter.write().unwrap();\
+            bloom.set(&key);\
+            let mut cache = self.lru_cache.write().unwrap();\
+            cache.put(key.clone(), fact.clone());\
+        \}\
+        let serialized = serde_json::to_vec(&fact).unwrap();\
+        let compressed = encode_all(&serialized[..], 3).unwrap();\
+        let db = self.db_conn.write().unwrap();\
+        let _ = db.execute("INSERT OR REPLACE INTO neural_vault (subject, data) VALUES (?1, ?2)", params![key, compressed]);\
+    \}\
+\
+    fn recall_history(&self) -> String \{\
+        let db = self.db_conn.read().unwrap();\
+        let mut stmt = db.prepare("SELECT data FROM neural_vault WHERE subject LIKE 'hist_%' ORDER BY subject DESC LIMIT 1").unwrap();\
+        let result = stmt.query_row([], |row| \{\
+            let compressed: Vec<u8> = row.get(0)?;\
+            let decompressed = decode_all(&compressed[..]).unwrap();\
+            let f: Fact = serde_json::from_slice(&decompressed).unwrap();\
+            Ok(f.content)\
+        \});\
+        match result \{\
+            Ok(c) => format!("[RECALL_HIT]: You previously mentioned: '\{\}'", c),\
+            Err(_) => "[RECALL_EMPTY]: No history found.".to_string(),\
+        \}\
+    \}\
+\}\
+\
+fn main() -> Result<()> \{\
+    // BOOT: Scan hardware, calculate RAM budget, and trigger setup wizard.\
+    let core = Arc::new(OmniCoreV21_19::new("omnicore_v21_19.db")?);\
+    println!("\\x1b[1;36m\{\}\\x1b[0m", core.system_report);\
+    Ok(())\
+\}\
+}

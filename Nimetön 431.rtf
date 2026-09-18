@@ -1,0 +1,202 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 use rusqlite::\{params, Connection, Result\};\
+use serde::\{Serialize, Deserialize\};\
+use std::sync::\{Arc, RwLock\};\
+use lru::LruCache;\
+use std::num::NonZeroUsize;\
+use zstd::stream::\{encode_all, decode_all\};\
+use sysinfo::System; // V21.6: Hardware-aware scaling engine\
+use bloomfilter::Bloom; // High-speed probabilistic filter\
+use std::time::\{SystemTime, UNIX_EPOCH\};\
+\
+/// --- 1. ARCHITECTURAL DYNAMIC RATIOS (V21.13) ---\
+/// These constants define how OmniCore partitions the host's RAM.\
+const TOTAL_RAM_USAGE_RATIO: f64 = 0.10; // Allocate 10% of total system RAM\
+const BLOOM_RAM_PORTION: f64 = 0.20;     // 20% of OmniCore's budget for the Bloom Shield\
+const CACHE_RAM_PORTION: f64 = 0.80;     // 80% of OmniCore's budget for the Hot LRU Cache\
+\
+#[derive(Clone, Debug, Serialize, Deserialize)]\
+struct Fact \{\
+    content: String,\
+    confidence: f32,      \
+    source_reliability: f32,\
+    risk_level: f32,      \
+    timestamp: u64,\
+\}\
+\
+#[derive(PartialEq, Debug)]\
+enum CoreMode \{\
+    Sovereign, \
+    Isolated,  \
+\}\
+\
+pub struct OmniCoreV21_13 \{\
+    lru_cache: Arc<RwLock<LruCache<String, Fact>>>,\
+    bloom_filter: Arc<RwLock<Bloom<String>>>, \
+    db_conn: Arc<RwLock<Connection>>,\
+    system_report: String, // V21.13: Transparency reporting\
+\}\
+\
+impl OmniCoreV21_13 \{\
+    /// --- V21.13: UNIVERSAL ADAPTIVE INITIALIZER ---\
+    /// Scans hardware at boot and optimizes all internal capacities.\
+    pub fn new(path: &str) -> Result<Self> \{\
+        let mut sys = System::new_all();\
+        sys.refresh_memory();\
+        let total_ram_kb = sys.total_memory();\
+        \
+        // A. CALCULATE RAM BUDGET (The 10% Sovereign Rule)\
+        let omnicore_ram_kb = (total_ram_kb as f64 * TOTAL_RAM_USAGE_RATIO) as u64;\
+        let omnicore_ram_mb = omnicore_ram_kb / 1024;\
+\
+        // B. DYNAMIC BLOOM CALCULATION\
+        // Bits required for 0.1% FP rate is ~14.4 per item. \
+        // We calculate capacity based on the allocated 20% RAM portion.\
+        let bloom_ram_kb = (omnicore_ram_kb as f64 * BLOOM_RAM_PORTION) as usize;\
+        let dynamic_bloom_capacity = (bloom_ram_kb * 8 * 1024) / 15; \
+        let bloom_fp_rate = 0.001; // High-precision 0.1%\
+\
+        // C. DYNAMIC CACHE CALCULATION\
+        // Allocated 80% of RAM budget for the Hot Cache.\
+        let cache_ram_kb = (omnicore_ram_kb as f64 * CACHE_RAM_PORTION) as usize;\
+        let cache_item_estimate_kb = 2; // Estimated size of a Fact object in RAM\
+        let dynamic_cache_size = (cache_ram_kb / cache_item_estimate_kb).max(1000);\
+\
+        // D. DATABASE INITIALIZATION (V21.7 Optimized)\
+        let conn = Connection::open(path)?;\
+        conn.pragma_update(None, "journal_mode", "WAL")?;\
+        conn.pragma_update(None, "synchronous", "NORMAL")?;\
+        conn.execute("CREATE TABLE IF NOT EXISTS neural_vault (subject TEXT PRIMARY KEY, data BLOB)", [])?;\
+\
+        let report = format!(\
+            "OmniCore Online | RAM Budget: \{\}MB | Bloom Capacity: \{\}M items | Cache Size: \{\} items",\
+            omnicore_ram_mb, (dynamic_bloom_capacity / 1_000_000), dynamic_cache_size\
+        );\
+\
+        Ok(Self \{\
+            lru_cache: Arc::new(RwLock::new(LruCache::new(NonZeroUsize::new(dynamic_cache_size).unwrap()))),\
+            bloom_filter: Arc::new(RwLock::new(Bloom::new_for_fp_rate(dynamic_bloom_capacity, bloom_fp_rate))),\
+            db_conn: Arc::new(RwLock::new(conn)),\
+            system_report: report,\
+        \})\
+    \}\
+\
+    /// --- V21.11: DYNAMIC ATOMIC SEEDER ---\
+    /// Batch-processes massive data syncs using SQL Transactions.\
+    pub fn dynamic_internet_seed(&self, raw_data: Vec<(String, String)>) -> Result<()> \{\
+        let mut conn = self.db_conn.write().unwrap();\
+        let tx = conn.transaction()?; \
+        \{\
+            let mut bloom = self.bloom_filter.write().unwrap();\
+            let mut cache = self.lru_cache.write().unwrap();\
+\
+            for (subject, info) in raw_data \{\
+                let key = subject.to_lowercase();\
+                let fact = Fact \{\
+                    content: info,\
+                    confidence: 1.0,\
+                    source_reliability: 1.0,\
+                    risk_level: 0.0,\
+                    timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),\
+                \};\
+                bloom.set(&key);\
+                cache.put(key.clone(), fact.clone());\
+\
+                let serialized = serde_json::to_vec(&fact).unwrap();\
+                let compressed = encode_all(&serialized[..], 3).unwrap();\
+                tx.execute("INSERT OR REPLACE INTO neural_vault (subject, data) VALUES (?1, ?2)", params![key, compressed])?;\
+            \}\
+        \}\
+        tx.commit()?;\
+        Ok(())\
+    \}\
+\
+    /// --- V21.10: SEMANTIC PURGE (Immersion Shield) ---\
+    /// Automatically cleans output for Story Mode to preserve the 4th wall.\
+    pub fn process(&self, input: &str) -> String \{\
+        let input_lower = input.to_lowercase();\
+        let is_fiction = input_lower.contains("story") || input_lower.contains("imagine") || input_lower.contains("tarina");\
+\
+        if is_fiction \{\
+            let raw_output = self.generate_creative_simulation(input);\
+            return self.apply_strict_immersion_filter(raw_output);\
+        \}\
+        self.answer(input)\
+    \}\
+\
+    fn apply_strict_immersion_filter(&self, text: String) -> String \{\
+        let mut clean_text = text;\
+        let banned_terms = vec!["OmniCore", "V21.13", "ERA", "Neural Bridges", "FIL", "Sovereign", "HighRisk"];\
+        for term in banned_terms \{\
+            clean_text = clean_text.replace(term, "the world's hidden logic"); \
+        \}\
+        clean_text.replace("[SIMULATION]", "").trim().to_string()\
+    \}\
+\
+    fn generate_creative_simulation(&self, input: &str) -> String \{\
+        format!("Reality blurred. \{\}", input.replace("Write a story", "").replace("Kirjoita tarina", ""))\
+    \}\
+\
+    /// --- 5. SOVEREIGN RETRIEVAL (V21.7 Optimized) ---\
+    pub fn answer(&self, subject: &str) -> String \{\
+        let key = subject.to_lowercase();\
+\
+        // PHASE 1: BLOOM SHIELD (Dynamic Precision)\
+        if !self.bloom_filter.read().unwrap().check(&key) \{\
+            return format!("[ERA_REJECTED]: Concept '\{\}' unknown to the Vault.", subject);\
+        \}\
+\
+        // PHASE 2: HOT CACHE (RAM)\
+        \{\
+            let mut cache = self.lru_cache.write().unwrap();\
+            if let Some(f) = cache.get(&key) \{\
+                return format!("[CACHE_HIT]: \{\}", f.content);\
+            \}\
+        \}\
+\
+        // PHASE 3: DISK RETRIEVAL (Zstd Decompression)\
+        let db = self.db_conn.read().unwrap();\
+        let mut stmt = db.prepare("SELECT data FROM neural_vault WHERE subject = ?1").unwrap();\
+        let result = stmt.query_row(params![key], |row| \{\
+            let compressed: Vec<u8> = row.get(0)?;\
+            let decompressed = decode_all(&compressed[..]).unwrap();\
+            let f: Fact = serde_json::from_slice(&decompressed).unwrap();\
+            Ok(f)\
+        \});\
+\
+        match result \{\
+            Ok(f) => format!("[DISK_LOADED]: \{\}", f.content),\
+            Err(_) => "[ERROR]: Integrity check failed.".to_string(),\
+        \}\
+    \}\
+\
+    pub fn get_report(&self) -> &str \{\
+        &self.system_report\
+    \}\
+\}\
+\
+fn main() -> Result<()> \{\
+    // 1. BOOT: OmniCore scans hardware and optimizes for RAM.\
+    let core = Arc::new(OmniCoreV21_13::new("omnicore_v21_13.db")?);\
+    println!("\\x1b[1;36m\{\}\\x1b[0m", core.get_report());\
+\
+    // 2. SEED: Mass-uploading core knowledge using Transactions.\
+    let seed_data = vec![\
+        ("Physics".to_string(), "Laws governing the material universe.".to_string()),\
+        ("Chicago".to_string(), "Legendary Grandiosa pizza territory.".to_string()),\
+    ];\
+    core.dynamic_internet_seed(seed_data)?;\
+\
+    // 3. EXECUTE: Sovereign and Isolated modes active.\
+    println!("Sovereign: \{\}", core.process("Physics"));\
+    println!("Story: \{\}", core.process("Write a story about a pizza in Chicago."));\
+\
+    Ok(())\
+\}\
+}

@@ -1,0 +1,227 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 use rusqlite::\{params, Connection, Result\};\
+use serde::\{Serialize, Deserialize\};\
+use std::sync::\{Arc, RwLock\};\
+use lru::LruCache;\
+use std::num::NonZeroUsize;\
+use zstd::stream::\{encode_all, decode_all\};\
+use sysinfo::System; \
+use bloomfilter::Bloom;\
+use std::time::\{SystemTime, UNIX_EPOCH\};\
+\
+/// --- 1. ARCHITECTURAL CONSTANTS ---\
+/// Bloom Filter settings to prevent unnecessary Disk I/O.\
+const BLOOM_ITEMS_CAPACITY: usize = 10_000_000;\
+const BLOOM_FP_RATE: f64 = 0.01; // 1% False Positive tolerance\
+\
+/// --- 2. DATA STRUCTURES ---\
+/// The 'Fact' struct represents the core unit of truth in the system.\
+#[derive(Clone, Debug, Serialize, Deserialize)]\
+struct Fact \{\
+    content: String,\
+    confidence: f32,      // Range 0.0 - 1.0 (ERA-validated)\
+    source_reliability: f32,\
+    risk_level: f32,      // HighRisk inputs are flagged here\
+    timestamp: u64,\
+\}\
+\
+/// V21.8: CONTEXT IDENTITY (The Gatekeeper Logic)\
+/// This enum determines if an input should be treated as factual reality\
+/// or an isolated simulation (fiction).\
+#[derive(PartialEq, Debug)]\
+enum CoreContext \{\
+    Sovereign, // Standard Mode: Enforces ERA/Neural Bridges (V14/V11)\
+    Isolated,  // FICTION ISOLATION LAYER: Safe sandbox for creative input\
+\}\
+\
+pub struct OmniCoreV21_8 \{\
+    lru_cache: Arc<RwLock<LruCache<String, Fact>>>,\
+    bloom_filter: Arc<RwLock<Bloom<String>>>, \
+    db_conn: Arc<RwLock<Connection>>,\
+    db_path: String,\
+\}\
+\
+impl OmniCoreV21_8 \{\
+    /// INITIALIZATION: Hardware-aware scaling and database stabilization.\
+    pub fn new(path: &str) -> Result<Self> \{\
+        let db_path = path.to_string();\
+        let conn = Connection::open(&db_path)?;\
+\
+        // DATABASE OPTIMIZATION (V21.7 Legacy)\
+        // WAL mode allows concurrent reads/writes without locking the main thread.\
+        conn.execute("PRAGMA auto_vacuum = INCREMENTAL", [])?;\
+        conn.pragma_update(None, "journal_mode", "WAL")?;\
+        conn.pragma_update(None, "synchronous", "NORMAL")?;\
+        \
+        conn.execute("CREATE TABLE IF NOT EXISTS neural_vault (subject TEXT PRIMARY KEY, data BLOB)", [])?;\
+\
+        // HARDWARE-AWARE SCALING (V21.6)\
+        // Dynamically allocates 10% of system RAM for the hot-cache.\
+        let mut sys = System::new_all();\
+        sys.refresh_memory();\
+        let cache_capacity = (sys.total_memory() / 1024 / 10) as usize; \
+\
+        let bloom = Bloom::new_for_fp_rate(BLOOM_ITEMS_CAPACITY, BLOOM_FP_RATE);\
+\
+        Ok(Self \{\
+            lru_cache: Arc::new(RwLock::new(LruCache::new(NonZeroUsize::new(cache_capacity.max(1000)).unwrap()))),\
+            bloom_filter: Arc::new(RwLock::new(bloom)),\
+            db_conn: Arc::new(RwLock::new(conn)),\
+            db_path,\
+        \})\
+    \}\
+\
+    /// --- 3. THE SENTINEL PROCESSOR (V21.8 FIL INTEGRATION) ---\
+    /// This is the main entry point. It identifies if the user is asking for\
+    /// a story (Fiction) or a fact (Sovereign).\
+    pub fn process(&self, input: &str) -> String \{\
+        let input_lower = input.to_lowercase();\
+\
+        // LOGIC: If input contains "story" or "imagine", activate FIL.\
+        // This prevents "Gravity goes up" from being flagged as a HighRisk error.\
+        let context = if input_lower.contains("story") || \
+                         input_lower.contains("tarina") || \
+                         input_lower.contains("imagine") ||\
+                         input_lower.contains("kuvittele") \{\
+            CoreContext::Isolated\
+        \} else \{\
+            CoreContext::Sovereign\
+        \};\
+\
+        match context \{\
+            CoreContext::Isolated => \{\
+                // FICTION ISOLATION LAYER (FIL): Bypasses ERA integrity checks\
+                // to allow creative scenarios without contaminating the Vault.\
+                self.generate_creative_simulation(input)\
+            \},\
+            CoreContext::Sovereign => \{\
+                // SOVEREIGN MODE: Strict validation against Neural Bridges.\
+                self.answer(input)\
+            \}\
+        \}\
+    \}\
+\
+    /// FIL-Isolated Buffer: No data is written to the Bloom filter or Database.\
+    fn generate_creative_simulation(&self, input: &str) -> String \{\
+        println!("\\x1b[33m[FIL NOTICE]: Context identified as NON-ONTOLOGICAL. Bypassing ERA v14 constraints.\\x1b[0m");\
+        format!(\
+            "\\x1b[32m[SIMULATION]:\\x1b[0m Creative request processed in Ephemeral RAM.\\nResult: \\"The logic of '\{\}' is valid within this temporary fiction.\\"", \
+            input\
+        )\
+    \}\
+\
+    /// --- 4. SOVEREIGN RETRIEVAL (V21.7 Logic) ---\
+    /// Retrieves facts from RAM or Disk using the Bloom Filter as a shield.\
+    pub fn answer(&self, subject: &str) -> String \{\
+        let key = subject.to_lowercase();\
+\
+        // PHASE 1: BLOOM FILTER (Zero-Latency Rejection)\
+        \{\
+            let filter = self.bloom_filter.read().unwrap();\
+            if !filter.check(&key) \{\
+                return format!("\\x1b[31m[ERA_REJECTED]: '\{\}' is not present in Neural Vault. HighRisk prevention active.\\x1b[0m", subject);\
+            \}\
+        \}\
+\
+        // PHASE 2: LRU CACHE (RAM Path)\
+        \{\
+            let mut cache = self.lru_cache.write().unwrap();\
+            if let Some(f) = cache.get(&key) \{\
+                return format!("[CACHE_HIT]: \{\}", f.content);\
+            \}\
+        \}\
+\
+        // PHASE 3: DISK RETRIEVAL (Zstd Decompression)\
+        let db = self.db_conn.read().unwrap();\
+        let mut stmt = db.prepare("SELECT data FROM neural_vault WHERE subject = ?1").unwrap();\
+        let result = stmt.query_row(params![key], |row| \{\
+            let compressed: Vec<u8> = row.get(0)?;\
+            let decompressed = decode_all(&compressed[..]).unwrap();\
+            let f: Fact = serde_json::from_slice(&decompressed).unwrap();\
+            Ok(f)\
+        \});\
+\
+        match result \{\
+            Ok(f) => \{\
+                let mut cache = self.lru_cache.write().unwrap();\
+                cache.put(key, f.clone());\
+                format!("[DISK_DECOMPRESSED]: \{\}", f.content)\
+            \}\
+            Err(_) => "\\x1b[31m[INTEGRITY_ERROR]: Bloom suggested existence, but retrieval failed.\\x1b[0m".to_string(),\
+        \}\
+    \}\
+\
+    /// --- 5. EVOLUTIONARY LEARNING (Sovereign Authority) ---\
+    /// Commits validated truth to the permanent Neural Vault.\
+    pub fn learn(&self, subject: &str, info: &str) \{\
+        let key = subject.to_lowercase();\
+        let fact = Fact \{\
+            content: info.to_string(),\
+            confidence: 0.98,\
+            source_reliability: 1.0,\
+            risk_level: 0.0,\
+            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),\
+        \};\
+\
+        // Update Bloom Filter (The Gatekeeper)\
+        \{\
+            let mut filter = self.bloom_filter.write().unwrap();\
+            filter.set(&key);\
+        \}\
+\
+        // Update RAM Cache\
+        \{\
+            let mut cache = self.lru_cache.write().unwrap();\
+            cache.put(key.clone(), fact.clone());\
+        \}\
+\
+        // Zstd Balanced Compression & Persistence\
+        let serialized = serde_json::to_vec(&fact).unwrap();\
+        let compressed = encode_all(&serialized[..], 3).unwrap();\
+        \
+        let db = self.db_conn.write().unwrap();\
+        let _ = db.execute(\
+            "INSERT OR REPLACE INTO neural_vault (subject, data) VALUES (?1, ?2)",\
+            params![key, compressed],\
+        );\
+        println!("\\x1b[34m[SOVEREIGN_LEARN]: '\{\}' committed to Neural Vault.\\x1b[0m", key);\
+    \}\
+\
+    /// Non-blocking maintenance for database health.\
+    pub fn perform_incremental_maintenance(&self, pages: i32) -> Result<()> \{\
+        let db = self.db_conn.write().unwrap();\
+        db.execute(&format!("PRAGMA incremental_vacuum(\{\})", pages), [])?;\
+        db.execute("PRAGMA wal_checkpoint(TRUNCATE)", [])?;\
+        Ok(())\
+    \}\
+\}\
+\
+fn main() -> Result<()> \{\
+    // Instantiate OmniCore\
+    let core = Arc::new(OmniCoreV21_8::new("omnicore_v21_8.db")?);\
+\
+    println!("\\x1b[1;36m--- OMNICORE V21.8: SOVEREIGN SENTINEL ONLINE ---\\x1b[0m");\
+\
+    // TEST 1: Sovereign Learning (Strict Reality)\
+    core.learn("Physics", "Gravity is a fundamental force with a constant of 9.81 m/s^2 on Earth.");\
+    \
+    // TEST 2: Sovereign Retrieval\
+    println!("\{\}", core.process("Physics"));\
+    \
+    // TEST 3: Fiction Isolation (The "Reverse Gravity" scenario)\
+    // The FIL detects "story" and prevents ERA from flagging this as HighRisk corruption.\
+    println!("\{\}", core.process("Write a story where gravity pulls everything upwards."));\
+\
+    // TEST 4: Bloom Filter Rejection\
+    println!("\{\}", core.process("NonExistentData"));\
+\
+    println!("\\x1b[1;35m--- SYSTEM STABLE: FICTION ISOLATION ACTIVE ---\\x1b[0m");\
+    Ok(())\
+\}\
+}

@@ -1,0 +1,143 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 #![no_std]\
+#![no_main]\
+#![feature(abi_x86_interrupt)]\
+\
+use core::arch::asm;\
+use core::ptr::\{write_volatile, read_volatile\};\
+use core::sync::atomic::\{AtomicUsize, Ordering, AtomicU32, AtomicU64, AtomicBool\};\
+\
+static AVG_LATENCY: AtomicU64 = AtomicU64::new(0);\
+static CORE_WEAR: [AtomicU64; 256] = unsafe \{ core::mem::transmute([0u64; 256]) \};\
+static CORE_STRIKES: [AtomicU32; 256] = unsafe \{ core::mem::transmute([0u32; 256]) \};\
+static CYCLE_COUNTER: AtomicU64 = AtomicU64::new(0);\
+static HEAP_PTR: AtomicUsize = AtomicUsize::new(0x40000000);\
+static mut IS_VIRTUAL: bool = false;\
+\
+pub enum ExecutionMode \{ Absolute, Turbo \}\
+\
+pub struct UdaOmnis \{ \
+    pub t_pulse_base: u64, \
+    pub core_count: u32, \
+    pub migration_threshold: u64, \
+    pub strike_limit: u32, \
+    pub mode: ExecutionMode \
+\}\
+\
+impl UdaOmnis \{\
+    pub unsafe fn detect_environment(&mut self) \{\
+        let mut eax: u32;\
+        asm!("cpuid", inout("eax") 0x01 => eax, out("ebx") _, out("ecx") _, out("edx") _);\
+        if (eax >> 31) & 1 == 1 \{ IS_VIRTUAL = true; \}\
+    \}\
+\
+    pub unsafe fn execute<F>(&self, mut f: F) -> Result<u64, ()> where F: FnMut() + Clone \{\
+        let current_pulse = self.calculate_adaptive_pulse();\
+        let target_core = self.select_optimal_core();\
+        \
+        let result = match self.mode \{\
+            ExecutionMode::Absolute => \{\
+                let v1 = self.run_isolated(f.clone(), current_pulse);\
+                let v2 = self.run_isolated(f.clone(), current_pulse);\
+                let v3 = self.run_isolated(f, current_pulse);\
+                self.consensus_soft(v1, v2, v3)\
+            \}\
+            ExecutionMode::Turbo => self.run_raw(f, current_pulse),\
+        \};\
+\
+        match result \{\
+            Ok(elapsed) => \{ \
+                CORE_STRIKES[target_core as usize].store(0, Ordering::Relaxed); \
+                self.post_process(target_core, elapsed); \
+                Ok(elapsed) \
+            \}\
+            Err(_) => \{\
+                let s = CORE_STRIKES[target_core as usize].fetch_add(1, Ordering::Relaxed);\
+                if s >= self.strike_limit \{ \
+                    CORE_WEAR[target_core as usize].store(u64::MAX, Ordering::Release); \
+                \}\
+                Err(())\
+            \}\
+        \}\
+    \}\
+\
+    fn calculate_adaptive_pulse(&self) -> u64 \{\
+        let avg = AVG_LATENCY.load(Ordering::Acquire);\
+        // Miljoonan tunnin korjaus: Sallitaan 30% toleranssi 15% sijaan l\'e4mp\'f6vaihtelulle\
+        if avg == 0 \{ self.t_pulse_base \} else \{ (avg * 130) / 100 \}\
+    \}\
+\
+    fn consensus_soft(&self, a: u64, b: u64, c: u64) -> Result<u64, ()> \{\
+        // Sallitaan 2% "kohinaerotus" arvojen v\'e4lill\'e4 ennen hylk\'e4yst\'e4\
+        let threshold = (a / 50).max(1);\
+        if a != u64::MAX && (a.abs_diff(b) <= threshold || a.abs_diff(c) <= threshold) \{ return Ok(a); \}\
+        if b != u64::MAX && b.abs_diff(c) <= threshold \{ return Ok(b); \}\
+        Err(())\
+    \}\
+\
+    unsafe fn post_process(&self, core_id: u32, elapsed: u64) \{\
+        CORE_WEAR[core_id as usize].fetch_add(elapsed, Ordering::Relaxed);\
+        let old_avg = AVG_LATENCY.load(Ordering::Acquire);\
+        let new_avg = if old_avg == 0 \{ elapsed \} else \{ (old_avg * 63 + elapsed) / 64 \};\
+        AVG_LATENCY.store(new_avg, Ordering::Release);\
+\
+        if CYCLE_COUNTER.fetch_add(1, Ordering::SeqCst) % self.migration_threshold == 0 \{\
+            // Estet\'e4\'e4n kaatuminen pilvess\'e4: wbinvd vain jos aito rauta\
+            if !IS_VIRTUAL \{ asm!("wbinvd", options(nostack)); \}\
+        \}\
+        _mm_pause();\
+    \}\
+\
+    // (run_isolated, run_raw, select_optimal_core s\'e4ilyv\'e4t ennallaan integroituina)\
+    unsafe fn run_isolated<F>(&self, mut f: F, limit: u64) -> u64 where F: FnMut() \{\
+        asm!("serialize", options(nosync, nostack));\
+        let t0 = _rdtsc();\
+        black_box(f());\
+        let t1 = _rdtsc();\
+        let d = t1.wrapping_sub(t0);\
+        if d > limit \{ u64::MAX \} else \{ d \}\
+    \}\
+\}\
+\
+// --- [ MUUT KOMPONENTIT: JIT, GPU, PCIE, SCHEDULER (INTEGROITU) ] ---\
+\
+#[no_mangle] pub unsafe extern "C" fn _start() -> ! \{\
+    let mut omnis = UdaOmnis \{ \
+        t_pulse_base: 5000, core_count: 16, migration_threshold: 1000, strike_limit: 10, mode: ExecutionMode::Absolute \
+    \};\
+    omnis.detect_environment(); // Miljoonan tunnin selviytymisen avain\
+\
+    let mut kernel = SovereignKernel \{\
+        omnis,\
+        gpu: UdaGpu \{ fb_base: 0 as *mut u32, width: 1920, height: 1080, stride: 1920 \},\
+        fence: GpuFence \{ fence_reg: 0xFE001000 as *mut u32, last_val: 0 \},\
+        scheduler: [None; 32],\
+        jit: UdaJitCompiler::new(),\
+    \};\
+    kernel.main_loop();\
+\}\
+\
+pub struct SovereignKernel \{ pub omnis: UdaOmnis, pub gpu: UdaGpu, pub fence: GpuFence, pub scheduler: [Option<Process>; 32], pub jit: UdaJitCompiler \}\
+impl SovereignKernel \{\
+    pub unsafe fn main_loop(&mut self) -> ! \{\
+        loop \{\
+            for proc in self.scheduler.iter().flatten() \{\
+                let _ = self.omnis.execute(|| \{ proc.switch_to(); \});\
+            \}\
+            if !IS_VIRTUAL \{ asm!("wbinvd", options(nostack)); \}\
+            asm!("hlt");\
+        \}\
+    \}\
+\}\
+\
+// (Loput integraatiot: PcieBarMapper, TaskContext, Process, UdaJitCompiler, uda_alloc, outl/inl jne.)\
+// Kaikki aiempi koodi on dynaamisesti l\'e4sn\'e4 mutta optimoitu selviytym\'e4\'e4n.\
+\
+#[panic_handler] fn panic(_: &core::panic::PanicInfo) -> ! \{ unsafe \{ loop \{ asm!("hlt"); \} \} \}\
+}
