@@ -1,0 +1,93 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 /*\
+ * V-AXION-512: THE HEMMINKI TRILOGY (v. 1.2.0 - NUMA-NEXUS)\
+ * Direct Hardware Memory Mapping & Core Affinity\
+ */\
+\
+extern crate libc;\
+use std::ptr;\
+\
+const FABRIC_SIZE: usize = 1024 * 1024; // Example size\
+\
+pub struct AxionFabric \{\
+    pub pages: [u8; FABRIC_SIZE],\
+\}\
+\
+impl AxionFabric \{\
+    /// [NUMA-NEXUS LAYER]\
+    /// Allocates memory directly from the OS kernel to ensure NUMA-local proximity.\
+    pub fn new_numa_local() -> *mut Self \{\
+        let size = std::mem::size_of::<AxionFabric>();\
+        \
+        unsafe \{\
+            // 1. MMAP: Direct kernel allocation bypassing the standard heap.\
+            // MAP_ANONYMOUS ensures we get zeroed physical pages from RAM.\
+            let ptr = libc::mmap(\
+                ptr::null_mut(),\
+                size,\
+                libc::PROT_READ | libc::PROT_WRITE,\
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,\
+                -1,\
+                0,\
+            );\
+\
+            if ptr == libc::MAP_FAILED \{\
+                panic!("CRITICAL: NUMA memory allocation failed.");\
+            \}\
+\
+            // 2. MLOCK: Pins the memory to RAM.\
+            // Prevents the OS from swapping this memory to disk, eliminating disk I/O jitter.\
+            libc::mlock(ptr, size);\
+\
+            let fabric_ptr = ptr as *mut AxionFabric;\
+            \
+            // 3. PAGE POISONING: Force physical page allocation NOW.\
+            // Writing 0x55 (poison) ensures the 'First Touch' policy binds memory to the current NUMA node.\
+            ptr::write_bytes((*fabric_ptr).pages.as_mut_ptr(), 0x55, FABRIC_SIZE);\
+\
+            fabric_ptr\
+        \}\
+    \}\
+\
+    /// Explicitly release the mmap'd memory.\
+    pub unsafe fn destroy(ptr: *mut Self) \{\
+        let size = std::mem::size_of::<AxionFabric>();\
+        // MUNMAP: Returns the memory back to the kernel.\
+        // This is safer than relying on standard 'Drop' for raw mmap pointers.\
+        libc::munmap(ptr as *mut libc::c_void, size);\
+    \}\
+\}\
+\
+fn main() \{\
+    // --- SHIELD-MODE: CORE ISOLATION & PRIORITY ---\
+    #[cfg(target_os = "linux")]\
+    unsafe \{\
+        // 1. CPU AFFINITY: Force the process to run ONLY on Core 0.\
+        // This maximizes L1/L2 cache hits and keeps the execution near the NUMA-allocated RAM.\
+        let mut cpu_set: libc::cpu_set_t = std::mem::zeroed();\
+        libc::CPU_SET(0, &mut cpu_set);\
+        libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &cpu_set);\
+\
+        // 2. REAL-TIME SCHEDULING: Set FIFO priority.\
+        // Prevents the OS scheduler from interrupting our measurement cycles.\
+        let param = libc::sched_param \{ sched_priority: 99 \};\
+        libc::sched_setscheduler(0, libc::SCHED_FIFO, &param);\
+    \}\
+\
+    println!("V-AXION-512: Shield-Mode Active. Memory Pinned to NUMA-Node 0.");\
+\
+    let fabric_ptr = AxionFabric::new_numa_local();\
+\
+    // ... PERFORM HIGH-PRECISION MEASUREMENTS HERE ...\
+\
+    // Cleanup\
+    unsafe \{ AxionFabric::destroy(fabric_ptr) \};\
+    println!("Fabric deallocated successfully.");\
+\}\
+}

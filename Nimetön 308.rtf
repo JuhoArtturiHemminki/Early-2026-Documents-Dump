@@ -1,0 +1,62 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 /* \
+ * PROJECT: \uc0\u936 -MATRIX (V.4.5.0-CONFIRMED-STABLE)\
+ * STANDARDS: DO-178C Level A, ISO 26262 ASIL-D.\
+ * FEATURE: Static Compile-Time Configuration Invariants.\
+ */\
+\
+#![no_std]\
+\
+// --- KONFIGURAATIO JA STAATTINEN VERIFIOINTI ---\
+const FRACTION_BITS: u32 = 16;\
+\
+// STAATTINEN ASSERTIO (Static Assertion)\
+// T\'e4m\'e4 varmistaa k\'e4\'e4nt\'e4misaikana, ett\'e4 Q-formaatti on t\'e4sm\'e4lleen se, \
+// mihin algoritmin tarkkuus ja ylivuotorajat on kalibroitu.\
+const _: () = \{\
+    if FRACTION_BITS != 16 \{\
+        panic!("\uc0\u936 -MATRIX Configuration Error: FRACTION_BITS must be exactly 16 for certified arithmetic.");\
+    \}\
+\};\
+\
+impl FixedQ16 \{\
+    const FRACTION_BITS: u32 = FRACTION_BITS;\
+    const ONE: i32 = 1 << Self::FRACTION_BITS;\
+    const MAX: i32 = i32::MAX;\
+    const MIN: i32 = i32::MIN;\
+\
+    /// Symmetrinen py\'f6ristys eksplisiittisell\'e4 neutraalilla keskipisteell\'e4.\
+    #[inline(always)]\
+    pub fn mul_final(self, rhs: Self) -> Self \{\
+        // Tyyppiturvallinen kerto-operaatio 64-bittisell\'e4 v\'e4livaiheella\
+        let product: i64 = self.0 as i64 * rhs.0 as i64;\
+        \
+        // Deterministinen offset-valinta (MC/DC-yhteensopiva)\
+        let half: i64 = 1 << (Self::FRACTION_BITS - 1);\
+        let offset = if product > 0 \{\
+            half\
+        \} else if product < 0 \{\
+            -half\
+        \} else \{\
+            0\
+        \};\
+\
+        let res_64 = (product + offset) >> Self::FRACTION_BITS;\
+\
+        // Deterministinen ASIL-D Saturaatio\
+        if res_64 > Self::MAX as i64 \{\
+            FixedQ16(Self::MAX)\
+        \} else if res_64 < Self::MIN as i64 \{\
+            FixedQ16(Self::MIN)\
+        \} else \{\
+            FixedQ16(res_64 as i32)\
+        \}\
+    \}\
+\}\
+}

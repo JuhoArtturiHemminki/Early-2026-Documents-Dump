@@ -1,0 +1,57 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 /* \
+ * PROJECT: \uc0\u936 -MATRIX (V.5.2.0-ULTIMATE-SYMMETRY)\
+ * FEATURE: Dual-Lane ILP & AVX-512 Unpack Saturation\
+ */\
+\
+impl FixedQ16 \{\
+    #[inline(always)]\
+    #[target_feature(enable = "avx512f,avx512bw")]\
+    pub unsafe fn mul_convergent_avx512(lhs: i32x16, rhs: i32x16) -> i32x16 \{\
+        // 1. Valmistellaan vakiot rinnakkain (ILP-hy\'f6ty)\
+        // N\'e4m\'e4 latautuvat rekistereihin samalla kun kertoimet liikkuvat\
+        let v_half = i64x16::splat(0x7FFF);\
+        let v_one = i64x16::splat(1);\
+        let v_max = i64x16::splat(i32::MAX as i64);\
+        let v_min = i64x16::splat(i32::MIN as i64);\
+\
+        // 2. Unpack & Multiply (AVX-512 Widening)\
+        // Jaetaan i32x16 kahteen i64x8 vektoriin (Low/High)\
+        // T\'e4m\'e4 on v\'e4ltt\'e4m\'e4t\'f6nt\'e4, koska i32x16 * i32x16 -> i64x16 vie 1024 bitti\'e4\
+        let (lhs_lo, lhs_hi) = lhs.deinterleave(i32x16::splat(0)); // Konseptuaalinen unpack\
+        let (rhs_lo, rhs_hi) = rhs.deinterleave(i32x16::splat(0));\
+\
+        // Lasketaan molemmat puolikkaat rinnakkain\
+        let prod_lo = i64x8::from_cast(lhs_lo) * i64x8::from_cast(rhs_lo);\
+        let prod_hi = i64x8::from_cast(lhs_hi) * i64x8::from_cast(rhs_hi);\
+\
+        // 3. Convergent Rounding (Pipeline Optimized)\
+        // Suoritetaan operaatiot molemmille puoliskoille\
+        let process_half = |prod: i64x8| \{\
+            let res_trunc = prod >> 16;\
+            let lsb = res_trunc & i64x8::splat(1);\
+            let adj = i64x8::splat(0x7FFF).saturating_add(lsb);\
+            \
+            let rounded = (prod.saturating_add(adj)) >> 16;\
+            \
+            // Saturaatio ennen pakkausta\
+            rounded.simd_min(i64x8::splat(i32::MAX as i64))\
+                   .simd_max(i64x8::splat(i32::MIN as i64))\
+        \};\
+\
+        let final_lo = process_half(prod_lo);\
+        let final_hi = process_half(prod_hi);\
+\
+        // 4. Ultimate Narrowing (vpackssdw / vpmovsqdb)\
+        // AVX-512:ssa voimme k\'e4ytt\'e4\'e4 vpmovsqdb, joka saturoi ja pakkaa\
+        // i64x16 suoraan takaisin i32x16:ksi yhdell\'e4 askeleella.\
+        i32x16::from_cast(final_lo, final_hi) \
+    \}\
+\}\
+}

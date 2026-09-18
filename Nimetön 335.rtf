@@ -1,0 +1,206 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\froman\fcharset0 Times-Roman;\f1\fnil\fcharset0 STIXGeneral-Regular;\f2\fnil\fcharset0 Menlo-Regular;
+\f3\ftech\fcharset77 Symbol;\f4\fnil\fcharset0 LucidaGrande;\f5\froman\fcharset0 Times-Bold;
+\f6\fnil\fcharset0 LucidaGrande-Bold;\f7\fnil\fcharset0 AppleSymbols;\f8\fswiss\fcharset0 Helvetica-Bold;
+\f9\fswiss\fcharset0 Helvetica;\f10\fnil\fcharset0 Menlo-Bold;}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;}
+{\*\listtable{\list\listtemplateid1\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid1\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{circle\}}{\leveltext\leveltemplateid2\'01\uc0\u9702 ;}{\levelnumbers;}\fi-360\li1440\lin1440 }{\listname ;}\listid1}}
+{\*\listoverridetable{\listoverride\listid1\listoverridecount0\ls1}}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab720
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 \expnd0\expndtw0\kerning0
+\
+\
+1. Kokonaisyht\'e4l\'f6 (The Unified Transform)\
+\pard\pardeftab720\partightenfactor0
+
+\f1 \cf0 \uc0\u55349 \u56644 
+\f0 (
+\f1 \uc0\u55349 \u56650 
+\f0 , 
+\f1 \uc0\u55349 \u56642 
+\f0 , \uc0\u916 , 
+\f2 \uc0\u8477 
+\f0 _prev) = \{ 
+\f1 \uc0\u55349 \u56675 
+\f0 (
+\f1 \uc0\u55349 \u56650 
+\f0 , 
+\f1 \uc0\u55349 \u56642 
+\f0 , \uc0\u916 ), jos 
+\f1 \uc0\u55349 \u56675 
+\f0 (
+\f1 \uc0\u55349 \u56650 
+\f0 , 
+\f1 \uc0\u55349 \u56642 
+\f0 , \uc0\u916 ) = rot(
+\f1 \uc0\u55349 \u56650 
+\f0  
+\f3 \uc0\u8853 
+\f0  
+\f1 \uc0\u55349 \u56642 
+\f0 , \uc0\u916 )\
+\{ \{1\}
+\f4 \uc0\u8309 
+\f0 \'b9\'b2, muulloin\
+
+\f1 \uc0\u55349 \u56643 
+\f0 (
+\f1 \uc0\u55349 \u56650 
+\f0 , 
+\f1 \uc0\u55349 \u56642 
+\f0 , \uc0\u916 , 
+\f2 \uc0\u8477 
+\f0 _prev) = 
+\f1 \uc0\u55349 \u57305 
+\f0  ( 
+\f2 \uc0\u8477 
+\f0 _prev = rot(
+\f1 \uc0\u55349 \u56650 
+\f0  
+\f3 \uc0\u8853 
+\f0  
+\f1 \uc0\u55349 \u56642 
+\f0 , \uc0\u916 ) )\
+\
+\
+\
+2. M\'e4\'e4ritelm\'e4t ja symbolien selvennykset\
+T\'e4ss\'e4 on avattu jokainen yht\'e4l\'f6ss\'e4 k\'e4ytetty erikoissymboli ja operaatio:\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls1\ilvl0
+\f5\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}
+\f1 \expnd0\expndtw0\kerning0
+\uc0\u55349 \u56650 
+\f5  
+\f3\b0 \uc0\u8712 
+\f5\b  \{0, 1\}
+\f6 \uc0\u8309 
+\f5 \'b9\'b2
+\f0\b0  : Sis\'e4\'e4ntuleva 512-bittinen datadivektori (Source data).\
+\ls1\ilvl0
+\f5\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}
+\f1 \expnd0\expndtw0\kerning0
+\uc0\u55349 \u56642 
+\f5  
+\f3\b0 \uc0\u8712 
+\f5\b  \{0, 1\}
+\f6 \uc0\u8309 
+\f5 \'b9\'b2
+\f0\b0  : Ankkurivektori (Anchor key), jota k\'e4ytet\'e4\'e4n vertailukohtana.\
+\ls1\ilvl0
+\f5\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}
+\f3\b0 \expnd0\expndtw0\kerning0
+\uc0\u8853 
+\f0  : Biteitt\'e4inen poissulkeva TAI (XOR). Laskee bittikohtaisen eron: s_n 
+\f3 \uc0\u8853 
+\f0  k_n = 1, jos bitit ovat erisuuret.\
+\ls1\ilvl0
+\f5\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+rot(
+\f1 \uc0\u55349 \u56655 
+\f5 , \uc0\u916 )
+\f0\b0  : Syklinen bittisiirto (Rotate) 
+\f1 \uc0\u55349 \u56655 
+\f0 -vektorille \uc0\u916 -askeleen verran. Toteuttaa loogisen siirron: (
+\f1 \uc0\u55349 \u56655 
+\f0  
+\f7 \uc0\u8810 
+\f0  \uc0\u916 ) 
+\f3 \uc0\u8744 
+\f0  (
+\f1 \uc0\u55349 \u56655 
+\f0  
+\f7 \uc0\u8811 
+\f0  (512 - \uc0\u916 )).\
+\ls1\ilvl0
+\f5\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}
+\f1 \expnd0\expndtw0\kerning0
+\uc0\u55349 \u56675 
+\f5 (
+\f1 \uc0\u55349 \u56650 
+\f5 , 
+\f1 \uc0\u55349 \u56642 
+\f5 , \uc0\u916 )
+\f0\b0  : Paloittain m\'e4\'e4ritelty lohkosuodatin (Density Filter). Se koostuu 64:st\'e4 itsen\'e4isest\'e4 8-bittisest\'e4 lohkosta 
+\f1 \uc0\u55349 \u56675 
+\f0 _i, miss\'e4 i 
+\f3 \uc0\u8712 
+\f0  \{0, \'85, 63\}.\
+\ls1\ilvl0
+\f5\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}
+\f1 \expnd0\expndtw0\kerning0
+\uc0\u55349 \u56675 
+\f5 _i(
+\f1 \uc0\u55349 \u56680 
+\f5 _i)
+\f0\b0  : Yksitt\'e4isen lohkon suodatusfunktio, joka perustuu Hamming-painoon:\uc0\u8232 
+\f1\b \uc0\u55349 \u56675 
+\f5 _i(
+\f1 \uc0\u55349 \u56680 
+\f5 _i) = \{ 
+\f1 \uc0\u55349 \u56680 
+\f5 _i, jos \uc0\u8721 
+\f8 \uc0\u8336 \u8332 \u8320 \u8311 
+\f5  b_
+\f8 \uc0\u8336 
+\f5  \uc0\u8804  4
+\f0\b0 \uc0\u8232 ** \{ 00000000
+\f4 \uc0\u8322 
+\f0 , jos \uc0\u8721 
+\f9 \uc0\u8336 \u8332 \u8320 \u8311 
+\f0  b_
+\f9 \uc0\u8336 
+\f0  > 4**\
+\pard\tx940\tx1440\pardeftab720\li1440\fi-1440\partightenfactor0
+\ls1\ilvl1\cf0 \kerning1\expnd0\expndtw0 {\listtext	
+\f4 \uc0\u9702 
+\f0 	}\expnd0\expndtw0\kerning0
+T\'e4ss\'e4 
+\f5\b \uc0\u8721 
+\f8 \uc0\u8336 \u8332 \u8320 \u8311 
+\f5  b_
+\f8 \uc0\u8336 
+\f0\b0  laskee lohkon asetetut bitit (ykk\'f6set). Jos niit\'e4 on yli 4, lohko nollataan t\'e4ysin.\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls1\ilvl0
+\f5\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}
+\f10 \expnd0\expndtw0\kerning0
+\uc0\u8477 
+\f5 _prev
+\f0\b0  : Rekisteriin tallennettu edellisen kellojakson suodatettu tila.\
+\ls1\ilvl0
+\f5\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}
+\f1 \expnd0\expndtw0\kerning0
+\uc0\u55349 \u56643 
+\f0\b0  : Lukitussignaali (r_lock).\
+\ls1\ilvl0
+\f5\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}
+\f1\b0 \expnd0\expndtw0\kerning0
+\uc0\u55349 \u57305 
+\f5\b (\'85)
+\f0\b0  : Indikaattorifunktio. Palauttaa arvon 1, jos sulkujen sis\'e4ll\'e4 oleva ehto on tosi, ja 0, jos se on ep\'e4tosi.\
+\ls1\ilvl0
+\f5\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+\{1\}
+\f6 \uc0\u8309 
+\f5 \'b9\'b2
+\f0\b0  : 512-bittinen vektori, jossa kaikki bitit on asetettu tilaan '1' (vastaa koodisi virhetilaa).\
+\ls1\ilvl0
+\f5\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}
+\f3\b0 \expnd0\expndtw0\kerning0
+\uc0\u8712 
+\f0  : Kuuluu joukkoon (esim. bitti kuuluu nollan ja yhden joukkoon).\
+\ls1\ilvl0
+\f5\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+\uc0\u8804 
+\f0\b0  : Pienempi tai yht\'e4 suuri kuin.\
+\ls1\ilvl0
+\f5\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}
+\f3\b0 \expnd0\expndtw0\kerning0
+\uc0\u8744 
+\f0  : Looginen TAI-operaatio (OR).\
+}

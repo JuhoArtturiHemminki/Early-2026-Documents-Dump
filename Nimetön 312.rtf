@@ -1,0 +1,47 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 /* \
+ * PROJECT: \uc0\u936 -MATRIX (V.10.0.0-PHYSICAL-SYMMETRY)\
+ * STAGE:   Hardware-Silicon Co-Design\
+ * CONFIG:  NUMA-Aware / Mitigations-Off / Fixed-Clock\
+ */\
+\
+use libc::\{numa_alloc_onnode, numa_free, mlock, sched_getcpu\};\
+\
+impl FixedQ16 \{\
+    /// Varaa muistia suoraan paikalliselta NUMA-solmulta latenssin puolittamiseksi.\
+    /// Vaatii libnuma-kirjaston linkityksen.\
+    pub unsafe fn alloc_numa_local(size: usize) -> *mut i32 \{\
+        let cpu = sched_getcpu();\
+        let node = (cpu / 8) as i32; // Esimerkki: 8 ydint\'e4 per node\
+        \
+        // Muistin varaus suoraan prosessorin omasta muistiohjaimesta\
+        let ptr = numa_alloc_onnode(size, node) as *mut i32;\
+        if !ptr.is_null() \{\
+            mlock(ptr as *const libc::c_void, size); // Lukitaan heti RAM-muistiin\
+        \}\
+        ptr\
+    \}\
+\
+    /// \uc0\u936 -MATRIX V.10.0.0: Suoritetaan "puhtaalla" raudalla ilman turva-aitoja.\
+    #[inline(always)]\
+    pub unsafe fn compute_physical_singularity(\
+        ptr_a: *const i32, \
+        ptr_b: *const i32, \
+        weights: *const i32\
+    ) -> i32x16 \{\
+        // T\'e4ss\'e4 vaiheessa:\
+        // 1. kernel parametrit: mitigations=off nohz_full=all isolcpus=managed\
+        // 2. intel_pstate: min_perf_pct=100, max_perf_pct=100\
+        // 3. Muisti: NUMA-local & Pinned\
+        \
+        let next_ptr = NonNull::new_unchecked(ptr_a.add(16) as *mut i32);\
+        Self::compute_kernel_v7_interleaved(ptr_a, ptr_b, weights, weights, next_ptr).0\
+    \}\
+\}\
+}

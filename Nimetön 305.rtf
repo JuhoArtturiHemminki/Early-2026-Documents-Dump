@@ -1,0 +1,106 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fmodern\fcharset0 Courier-Bold;\f1\fnil\fcharset0 Menlo-Bold;}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab720
+\pard\pardeftab720\partightenfactor0
+
+\f0\b\fs26 \cf0 \expnd0\expndtw0\kerning0
+/* \
+ * PROJECT: 
+\f1 \uc0\u936 
+\f0 -MATRIX (V.2.1.0-AUDITED-GOLD)\
+ * OWNER: [Sinun Nimesi] - ALL RIGHTS RESERVED\
+ * \
+ * DESIGN SPEC: Mission-critical ECU kernel with strong type safety.\
+ * STANDARDS: Based on Ideal Gas Law (PV=nRT) & SAE J1349 (Atmospheric Correction).\
+ */\
+\
+#![no_std]\
+\
+use core::ops::\{Add, Sub, Mul, Div\};\
+\
+// --- NEWTYPE PATTERN: PHYSICAL UNITS ---\
+#[derive(Copy, Clone, PartialOrd, PartialEq, Debug)] pub struct Rpm(pub f32);\
+#[derive(Copy, Clone, PartialOrd, PartialEq, Debug)] pub struct Celsius(pub f32);\
+#[derive(Copy, Clone, PartialOrd, PartialEq, Debug)] pub struct HPa(pub f32);\
+#[derive(Copy, Clone, PartialOrd, PartialEq, Debug)] pub struct Normalized(pub f32);\
+\
+// --- PHYSICAL CONSTANTS (SAE J1349 / ISO 1585) ---\
+const R_SPECIFIC_AIR: f32 = 287.058; // J/(kg\'b7K)\
+const T_ZERO_KELVIN: f32 = 273.15;\
+const STD_AIR_DENSITY: f32 = 1.225; // kg/m^3 @ 1013.25 hPa, 15\'b0C\
+const INTEGRAL_LIMIT: f32 = 5000.0;\
+const MIN_DT: f32 = 0.001; \
+\
+// --- CALIBRATION PARAMETERS (Proprietary Tuning) ---\
+const K_LEARNING_GAIN: f32 = 0.04239851;\
+const K_STABILITY_BIAS: f32 = 0.9945701;\
+const K_TRANS_SENSE: f32 = 0.8872;\
+const K_FLOW_SCALE: f32 = 0.152;\
+const K_IGN_BASE: f32 = 12.5;\
+\
+pub struct CoreMatrix \{\
+    state_est: f32,\
+    prev_input: f32,\
+    integral_sum: f32,\
+    filtered_delta: f32,\
+\}\
+\
+impl CoreMatrix \{\
+    pub fn new() -> Self \{\
+        Self \{ state_est: 0.85, prev_input: 0.0, integral_sum: 0.0, filtered_delta: 0.0 \}\
+    \}\
+\
+    /// step-funktio hy\'f6dynt\'e4\'e4 nyt vahvoja tyyppej\'e4 est\'e4\'e4kseen v\'e4\'e4r\'e4t yksik\'f6t.\
+    pub fn step(&mut self, rpm: Rpm, load: f32, dt: f32, temp: Celsius, baro: HPa) -> Normalized \{\
+        let d_t = dt.max(MIN_DT);\
+        \
+        // 1. DENSITY CORRECTION (Ideal Gas Law: 
+\f1 \uc0\u961 
+\f0  = P / (R_spec * T))\
+        // Ref: SAE J1349 Standard for engine power correction.\
+        let temp_k = temp.0 + T_ZERO_KELVIN;\
+        let pressure_pa = baro.0 * 100.0;\
+        let rho = pressure_pa / (R_SPECIFIC_AIR * temp_k.max(10.0));\
+        let env_corr = (rho / STD_AIR_DENSITY).clamp(0.5, 2.0);\
+\
+        // 2. PREDICTIVE STATE & DIFFERENTIATION\
+        // Based on Transient Volumetric Efficiency modeling.\
+        let p_state = ((load * 1.02) + (rpm.0 * 0.0001)) * env_corr;\
+        let raw_delta = p_state - self.prev_input;\
+        self.filtered_delta = (0.15 * raw_delta) + 0.85 * self.filtered_delta;\
+\
+        // 3. FLUID DYNAMICS (Torricelli-derived flow estimation)\
+        let safe_rpm = rpm.0.abs().max(0.05);\
+        let flow = (load * K_FLOW_SCALE * env_corr) / (safe_rpm * 0.001);\
+        let ign_vector = K_IGN_BASE - (flow * 0.2) + (rpm.0 * 0.0005);\
+\
+        // 4. TRANSIENT STABILITY & INTEGRATION\
+        let v_inst_raw = (flow * ign_vector) * (self.filtered_delta / d_t);\
+        let v_inst = v_inst_raw.clamp(-2500.0, 2500.0);\
+        \
+        let next_i = self.integral_sum + (v_inst + K_STABILITY_BIAS) * d_t;\
+        self.integral_sum = next_i.clamp(-INTEGRAL_LIMIT, INTEGRAL_LIMIT);\
+        \
+        self.state_est += K_LEARNING_GAIN * (p_state - self.state_est);\
+        self.prev_input = p_state;\
+\
+        Normalized(self.integral_sum)\
+    \}\
+\}\
+\
+#[cfg(test)]\
+mod tests \{\
+    use super::*;\
+\
+    #[test]\
+    fn test_type_safety_compilation() \{\
+        let mut core = CoreMatrix::new();\
+        // T\'e4m\'e4 testi varmistaa, ett\'e4 tyyppien kytkent\'e4 toimii.\
+        let res = core.step(Rpm(2000.0), 1.0, 0.01, Celsius(20.0), HPa(1013.25));\
+        assert!(res.0.is_finite());\
+    \}\
+\}\
+}

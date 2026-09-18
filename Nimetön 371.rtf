@@ -1,0 +1,134 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 use std::\{mem, ptr, alloc, cell::UnsafeCell, sync::Arc\};\
+use rayon::prelude::*;\
+use core_affinity::\{get_core_ids, set_for_current\};\
+\
+#[cfg(target_arch = "x86_64")] use \{std::arch::x86_64::*, dynasmrt::\{dynasm, DynasmApi, DynasmLabelApi, ExecutableBuffer\}\};\
+#[cfg(target_arch = "aarch64")] use std::arch::aarch64::*;\
+\
+#[repr(C, align(64))]\
+#[derive(Clone, Copy)]\
+pub struct TileConfig \{ palette_id: u8, start_row: u8, reserved: [u8; 14], colsb: [u16; 16], rows: [u8; 16] \}\
+\
+#[cfg(target_arch = "x86_64")]\
+thread_local! \{ static JMP_BUF: UnsafeCell<libc::sigjmp_buf> = UnsafeCell::new(unsafe \{ mem::zeroed() \}); \}\
+\
+#[derive(PartialEq, Clone, Copy)]\
+pub enum OperationType \{ LinearLogic, MatrixMatrix, OmniCompute \}\
+\
+struct FabricStorage \{ ptr: *mut u8, layout: alloc::Layout, size: usize \}\
+impl Drop for FabricStorage \{ fn drop(&mut self) \{ unsafe \{ alloc::dealloc(self.ptr, self.layout); \} \} \}\
+\
+pub struct AxionFabric \{\
+    storage: Arc<FabricStorage>, size: usize, l2: usize, prefetch: usize, rdt: u32,\
+    #[cfg(target_arch = "x86_64")] jit: [Option<ExecutableBuffer>; 2],\
+\}\
+\
+unsafe impl Send for AxionFabric \{\}\
+unsafe impl Sync for AxionFabric \{\}\
+\
+impl AxionFabric \{\
+    pub fn new(size: usize) -> Self \{\
+        let align = if cfg!(target_arch = "x86_64") \{ 2<<20 \} else \{ 64 \};\
+        let layout = alloc::Layout::from_size_align(size, align).unwrap();\
+        let ptr = unsafe \{\
+            let p = alloc::alloc(layout);\
+            if p.is_null() \{ alloc::handle_alloc_error(layout); \}\
+            #[cfg(target_os = "linux")] \{\
+                libc::madvise(p as _, size, libc::MADV_HUGEPAGE);\
+                let (mut n, m) = (0, !0usize);\
+                while libc::access(format!("/sys/devices/system/node/node\{\}", n).as_ptr() as _, 0) == 0 \{ n += 1; \}\
+                if n > 1 \{ libc::syscall(libc::SYS_mbind, p, size, 3, &m, n + 1, 0); \}\
+                #[cfg(target_arch = "x86_64")] Self::setup_sig();\
+            \}\
+            p\
+        \};\
+        let l2 = Self::get_l2();\
+        Self \{\
+            storage: Arc::new(FabricStorage \{ ptr, layout, size \}), size, l2, prefetch: (l2/1024).clamp(8, 64),\
+            rdt: unsafe \{ if libc::access("/sys/fs/resctrl/tasks".as_ptr() as _, 2) == 0 \{ 1 \} else \{ 0 \} \},\
+            #[cfg(target_arch = "x86_64")] jit: [Self::gen_jit(true, l2/1024), Self::gen_jit(false, l2/1024)],\
+        \}\
+    \}\
+\
+    fn get_l2() -> usize \{\
+        #[cfg(target_arch = "x86_64")] \{ let c = unsafe \{ __cpuid(0x8000_0006) \}; if c.ecx>>16 > 0 \{ return (c.ecx>>16) as usize * 1024; \} \}\
+        256 * 1024\
+    \}\
+\
+    #[cfg(target_arch = "x86_64")]\
+    fn gen_jit(temp: bool, dist: usize) -> Option<ExecutableBuffer> \{\
+        if !is_x86_feature_detected!("avx512f") \{ return None; \}\
+        let mut ops = dynasmrt::x64::Assembler::new().ok()?;\
+        let unroll = if is_x86_feature_detected!("avx512dq") \{ 4 \} else \{ 2 \};\
+        dynasm!(ops ; .arch x64 ; mov rcx, rsi ; shr rcx, 6 ; jz >tail ; vpxord zmm1, zmm1, zmm1 ; vnotpd zmm1, zmm1 ; align 64 ; loop_start:);\
+        for i in 0..unroll \{\
+            dynasm!(ops ; prefetcht0 [rdi + ((dist*64)+(i*64)) as i32] ; vmovdqa64 zmm0, [rdi + (i*64)] ; vpxorq zmm0, zmm0, zmm1);\
+            if temp \{ dynasm!(ops ; vmovdqa64 [rdi + (i*64)], zmm0); \} else \{ dynasm!(ops ; vmovntdq [rdi + (i * 64)], zmm0); \}\
+        \}\
+        dynasm!(ops ; add rdi, (64 * unroll) ; sub rcx, unroll as i64 ; ja <loop_start ; tail: ; sfence ; ret);\
+        ops.finalize().ok()\
+    \}\
+\
+    #[cfg(target_arch = "x86_64")]\
+    unsafe fn setup_sig() \{\
+        let mut sa: libc::sigaction = mem::zeroed();\
+        sa.sa_sigaction = (|_, _, _| JMP_BUF.with(|b| libc::siglongjmp(*b.get(), 1))) as usize;\
+        sa.sa_flags = libc::SA_SIGINFO;\
+        libc::sigaction(libc::SIGILL, &sa, ptr::null_mut());\
+        libc::sigaction(libc::SIGSEGV, &sa, ptr::null_mut());\
+    \}\
+\
+    pub fn execute(&mut self, op: OperationType) \{\
+        let cores = get_core_ids().unwrap_or_default();\
+        let (amx, sve, sme) = (is_x86_feature_detected!("amx-tile"), cfg!(target_arch="aarch64") && unsafe \{ std::arch::is_aarch64_feature_detected!("sve") \}, cfg!(target_arch="aarch64") && unsafe \{ std::arch::is_aarch64_feature_detected!("sme") \});\
+        let cfg = TileConfig \{ palette_id: 1, start_row: 0, reserved: [0; 14], colsb: if op == OperationType::MatrixMatrix && self.size > 1<<20 \{64\} else \{32\}, rows: if op == OperationType::MatrixMatrix && self.size > 1<<20 \{16\} else \{8\} \};\
+\
+        unsafe \{ std::slice::from_raw_parts_mut(self.storage.ptr, self.size) \}.par_chunks_mut(self.l2).enumerate().for_each(|(i, chunk)| \{\
+            if !cores.is_empty() \{ \
+                set_for_current(cores[i % cores.len()]);\
+                if self.rdt > 0 \{ unsafe \{ let _ = std::fs::write(format!("/sys/fs/resctrl/p\{\}/tasks", self.rdt), libc::syscall(libc::SYS_gettid).to_string()); \} \}\
+            \}\
+            let (p, len) = (chunk.as_mut_ptr(), chunk.len());\
+            unsafe \{\
+                #[cfg(target_arch = "x86_64")] \{\
+                    if amx && op == OperationType::MatrixMatrix && len >= 3072 \{\
+                        asm!("ldtilecfg [\{0\}]", "tileloadd tmm0, [\{1\}+64]", "tileloadd tmm1, [\{2\}+64]", "tdpbusd tmm2, tmm0, tmm1", "tilestored [\{3\}+64], tmm2", "tilerelease", in(reg) &cfg, in(reg) p, in(reg) p.add(1024), in(reg) p.add(2048));\
+                    \} else if let Some(ref buf) = self.jit[if op == OperationType::OmniCompute \{0\} else \{1\}] \{\
+                        let f: extern "C" fn(*mut u8, usize) = mem::transmute(buf.ptr(dynasmrt::AssemblyOffset(0)));\
+                        JMP_BUF.with(|b| if libc::sigsetjmp(*b.get(), 1) == 0 \{ f(p, len) \} else \{ self.run_avx2(p, len) \});\
+                    \} else \{ self.run_avx2(p, len) \}\
+                \}\
+                #[cfg(target_arch = "aarch64")] \{\
+                    if sme && op == OperationType::MatrixMatrix && len >= 4096 \{\
+                        asm!("smstart sm", "ptrue p0.b", "ld1b \{\{z0.b\}\}, p0/z, [x0]", "ld1b \{\{z1.b\}\}, p0/z, [x1]", "fmopa za0.s, p0/m, p0/m, z0.s, z1.s", "smstop sm", in("x0") p, in("x1") p.add(1024));\
+                    \} else if sve \{\
+                        let (mut o, mut vl) = (0, 0usize); asm!("rdvl \{0\}, #1", out(reg) vl);\
+                        while o + (vl*4) <= len \{\
+                            asm!("ptrue p0.b", "prfb [x0, \{4\}]", "ld1b \{\{z0.b\}\}, p0/z, [x0]", "ld1b \{\{z1.b\}\}, p0/z, [x1]", "ld1b \{\{z2.b\}\}, p0/z, [x2]", "ld1b \{\{z3.b\}\}, p0/z, [x3]", "not z0.b, p0/m, z0.b", "not z1.b, p0/m, z1.b", "not z2.b, p0/m, z2.b", "not z3.b, p0/m, z3.b", "st1b \{\{z0.b\}\}, p0, [x0]", "st1b \{\{z1.b\}\}, p0, [x1]", "st1b \{\{z2.b\}\}, p0, [x2]", "st1b \{\{z3.b\}\}, p0, [x3]", in("x0") p.add(o), in("x1") p.add(o+vl), in("x2") p.add(o+vl*2), in("x3") p.add(o+vl*3), in(reg) self.prefetch*vl);\
+                            o += vl * 4;\
+                        \}\
+                        while o < len \{ asm!("whilelt p1.b, x1, x2", "ld1b \{\{z0.b\}\}, p1/z, [x0]", "not z0.b, p1/m, z0.b", "st1b \{\{z0.b\}\}, p1, [x0]", in("x0") p.add(o), in("x1") o, in("x2") len); o += vl; \}\
+                    \} else \{\
+                        let mut o = 0; while o + 16 <= len \{ let ptr = p.add(o) as *mut uint8x16_t; vst1q_u8(ptr as _, vmvnq_u8(vld1q_u8(ptr as _))); o += 16; \}\
+                        while o < len \{ *p.add(o) = !*p.add(o); o += 1; \}\
+                    \}\
+                \}\
+            \}\
+        \});\
+    \}\
+\
+    #[target_feature(enable = "avx2")]\
+    unsafe fn run_avx2(&self, p: *mut u8, len: usize) \{\
+        let (mut c, m) = (p as *mut __m256i, _mm256_set1_epi64x(-1));\
+        for _ in 0..(len/32) \{ _mm256_store_si256(c, _mm256_xor_si256(_mm256_load_si256(c), m)); c = c.add(1); \}\
+        let mut o = (len/32)*32; while o < len \{ *p.add(o) = !*p.add(o); o += 1; \}\
+    \}\
+\}\
+}

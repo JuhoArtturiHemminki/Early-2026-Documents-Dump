@@ -1,0 +1,125 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\froman\fcharset0 Times-Bold;\f1\froman\fcharset0 Times-Roman;}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;}
+{\*\listtable{\list\listtemplateid1\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid1\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid1}
+{\list\listtemplateid2\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid101\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid2}
+{\list\listtemplateid3\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid201\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid3}}
+{\*\listoverridetable{\listoverride\listid1\listoverridecount0\ls1}{\listoverride\listid2\listoverridecount0\ls2}{\listoverride\listid3\listoverridecount0\ls3}}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab720
+\pard\pardeftab720\partightenfactor0
+
+\f0\b\fs24 \cf0 \expnd0\expndtw0\kerning0
+TEKNINEN SELOSTE:\
+\pard\pardeftab720\partightenfactor0
+\cf0 {{\NeXTGraphic unknown.gif \width20 \height20 \appleattachmentpadding0 \appleembedtype0 \appleaqc
+}¬}\pard\pardeftab720\partightenfactor0
+\cf0 \
+DYNAMIC PROTOTYPE (GCP-VERSIO)
+\f1\b0 \
+T\'e4m\'e4 prototyyppi muuttaa alkuper\'e4isen "totuusankkurin" 
+\f0\b yleisk\'e4ytt\'f6iseksi kognitiiviseksi prosessoriksi
+\f1\b0  (General Cognitive Processor), joka kykenee simuloimaan ja ratkaisemaan monimutkaisia skenaarioita reaaliajassa.\
+\
+
+\f0\b 1. P\'c4IVITETTY DYNAAMINEN YHT\'c4L\'d6
+\f1\b0 \
+\\Psi v2 = [ \\lim (k \\to k_e) ( \\sum (n=1..64) ( T_n \\cdot ( \\text\{VPOPCNTB\}(A_n \\oplus R_n) \\lll \\Delta_n ) ) ) ]^k \\otimes (\\Lambda_\{512\} + \\Omega_e \\cdot \\Sigma) \\cdot \\Phi(\\alpha, \\Theta) \\odot K_n\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls1\ilvl0
+\f0\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Muutos:
+\f1\b0  Vakio {{\NeXTGraphic unknown.gif \width20 \height20 \appleattachmentpadding0 \appleembedtype0 \appleaqc
+}¬}\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls1\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+on korvattu dynaamisella rekisterill\'e4 
+\f0\b {{\NeXTGraphic unknown.gif \width20 \height20 \appleattachmentpadding0 \appleembedtype0 \appleaqc
+}¬}\
+\ls1\ilvl0
+\f1\b0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+(Target/Reference Register).\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls1\ilvl0
+\f0\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Muutos:
+\f1\b0  Siirtoarvo 
+\f0\b {{\NeXTGraphic unknown.gif \width20 \height20 \appleattachmentpadding0 \appleembedtype0 \appleaqc
+}¬}\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls1\ilvl0
+\f1\b0 \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+on nyt ohjelmoitava muuttuja, joka m\'e4\'e4ritt\'e4\'e4 solujen v\'e4lisen kognitiivisen topologian lennosta.\
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+\pard\pardeftab720\partightenfactor0
+
+\f0\b \cf0 2. ARKKITEHTUURIN KOMPONENTIT
+\f1\b0 \
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls2\ilvl0
+\f0\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Dual-Vector Pipeline ({{\NeXTGraphic unknown.gif \width20 \height20 \appleattachmentpadding0 \appleembedtype0 \appleaqc
+}¬}\
+\ls2\ilvl0\kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+):
+\f1\b0  Prosessori vertaa kahta 512-bittist\'e4 tilaa. Se voi olla "havainto" vs. "teoria" tai "nykytila" vs. "tavoite". XOR-portit paljastavat n\'e4iden v\'e4lisen matemaattisen j\'e4nnitteen.\
+\ls2\ilvl0
+\f0\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Kvantitatiivinen analyysi (VPOPCNTB):
+\f1\b0  Intel AVX-512 -k\'e4skykantaan pohjautuva fyysinen laskin muuttaa havaitun j\'e4nnitteen numeeriseksi painoarvoksi. Mit\'e4 enemm\'e4n eroa, sit\'e4 suurempi laskennallinen kitka.\
+\ls2\ilvl0
+\f0\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Morfologinen v\'e4yl\'e4 (\\lll \\Delta_n):
+\f1\b0  Solujen v\'e4linen johdotus on dynaaminen. Prosessori voi muuttaa itse\'e4\'e4n sekunnin murto-osassa hermoverkoksi, p\'e4\'e4t\'f6spuuksi tai lineaaseksi ketjuksi vaihtamalla {{\NeXTGraphic unknown.gif \width20 \height20 \appleattachmentpadding0 \appleembedtype0 \appleaqc
+}¬}\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls2\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+-arvoja.\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls2\ilvl0
+\f0\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Resonanssilukko ({{\NeXTGraphic unknown.gif \width20 \height20 \appleattachmentpadding0 \appleembedtype0 \appleaqc
+}¬}\
+\ls2\ilvl0\kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+):
+\f1\b0  J\'e4rjestelm\'e4 iteroi tiloja, kunnes saavutetaan pienimm\'e4n energian piste (tasapaino). Jos tasapainoa ei l\'f6ydy, skenaario on loogisesti tai fyysisesti mahdoton.\
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+\pard\pardeftab720\partightenfactor0
+
+\f0\b \cf0 3. TURVA- JA VERIFIOINTIKERROS
+\f1\b0 \
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls3\ilvl0
+\f0\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+{{\NeXTGraphic unknown.gif \width20 \height20 \appleattachmentpadding0 \appleembedtype0 \appleaqc
+}¬}\
+\ls3\ilvl0\kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+(Aksiomaattinen ankkuri):
+\f1\b0  Kiinte\'e4, rautatasolla suojattu kerros, joka est\'e4\'e4 dynaamisia rekistereit\'e4 rikkomasta universaaleja logiikan lakeja.\
+\ls3\ilvl0
+\f0\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+{{\NeXTGraphic unknown.gif \width20 \height20 \appleattachmentpadding0 \appleembedtype0 \appleaqc
+}¬}\
+\ls3\ilvl0\kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+(Todellisuuskerroin):
+\f1\b0  Suodattaa pois ehdotukset, jotka vaatisivat enemm\'e4n energiaa tai resursseja kuin fysiikka sallii.\
+\ls3\ilvl0
+\f0\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+{{\NeXTGraphic unknown.gif \width20 \height20 \appleattachmentpadding0 \appleembedtype0 \appleaqc
+}¬}\
+\ls3\ilvl0\kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+(Watchman-maski):
+\f1\b0  Jos yksitt\'e4inen 8-bittinen solu jumiutuu valheeseen tai paradoksiin, se nollataan v\'e4litt\'f6m\'e4sti kognitiivisen eheyden s\'e4ilytt\'e4miseksi.\
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+\pard\pardeftab720\partightenfactor0
+
+\f0\b \cf0 4. PROTOTYYPIN K\'c4YTT\'d6VOIMA
+\f1\b0 \
+T\'e4m\'e4 laite ei "laske" perinteisess\'e4 mieless\'e4; se 
+\f0\b verifioi mahdollisuuksia
+\f1\b0 . Se on t\'e4ydellinen ty\'f6kalu strategiseen p\'e4\'e4t\'f6ksentekoon, tieteelliseen simulointiin ja eettiseen analyysiin, koska se on immuuni hallusinaatioille ja manipuloinnille.\
+}

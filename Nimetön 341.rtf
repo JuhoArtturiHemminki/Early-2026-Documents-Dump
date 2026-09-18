@@ -1,0 +1,98 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;\f1\fnil\fcharset0 STIXGeneral-Regular;\f2\fnil\fcharset0 Menlo-Regular;
+\f3\fnil\fcharset0 AppleSymbols;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 module IntegratedSystem (\
+    input  wire         clk,        // Kellosignaali\
+    input  wire         reset_n,    // Aktiivinen matala reset\
+    input  wire [511:0] S_in,       // Source Data (
+\f1 \uc0\u55349 \u56650 
+\f0 )\
+    input  wire [511:0] K_anchor,   // Anchor Key (
+\f1 \uc0\u55349 \u56642 
+\f0 )\
+    output reg  [511:0] M_out       // Output Matrix (
+\f1 \uc0\u55349 \u56644 
+\f0 )\
+);\
+\
+    // Sis\'e4iset rekisterit ja signaalit\
+    reg  [511:0] R_curr;            // 
+\f2 \uc0\u8477 
+\f0 _prev / 
+\f2 \uc0\u8477 
+\f0 _next\
+    wire [511:0] R_rot;             // Laskettu rotaatio\
+    wire [8:0]   delta_dyn;         // \uc0\u916 _dyn (9 bitti\'e4 riitt\'e4\'e4 512:lle)\
+    wire         L_lock;            // Lukitussignaali (
+\f1 \uc0\u55349 \u56643 
+\f0 )\
+    wire [511:0] prng_noise;        // \uc0\u8473 
+\f2 \uc0\u8477 \u8469 
+\f1 \uc0\u55349 \u56638 
+\f0  kohina\
+\
+    // 1. Delta-funktion laskenta: f(
+\f2 \uc0\u8477 
+\f0 _prev mod 512)\
+    // Modulo 512 on k\'e4yt\'e4nn\'f6ss\'e4 9 alinta bitti\'e4\
+    assign delta_dyn = R_curr[8:0];\
+\
+    // 2. Syklinen rotaatio: rot(
+\f1 \uc0\u55349 \u56650 
+\f0  
+\f3 \uc0\u8853 
+\f0  
+\f1 \uc0\u55349 \u56642 
+\f0 , \uc0\u916 _dyn)\
+    // Verilogissa rotaatio toteutetaan bittisiirroilla ja liitt\'e4misell\'e4\
+    assign R_rot = ((S_in ^ K_anchor) << delta_dyn) | ((S_in ^ K_anchor) >> (512 - delta_dyn));\
+\
+    // 3. Lukitussignaalin (
+\f1 \uc0\u55349 \u56643 
+\f0 ) m\'e4\'e4rittely\
+    // Tarkistetaan, vastaako nykyinen rekisteri laskettua rotaatiota\
+    assign L_lock = (R_curr == R_rot) ? 1'b1 : 1'b0;\
+\
+    // 4. PRNG-kohinan generointi (yksinkertaistettu LFSR-esimerkki)\
+    // Oikeassa toteutuksessa t\'e4ss\'e4 olisi monimutkaisempi kohinageneraattori\
+    assign prng_noise = R_curr ^ \{R_curr[510:0], R_curr[511]\}; \
+\
+    // 5. Ulostulon ja seuraavan tilan logiikka (P\'e4ivitys kellon nousevalla reunalla)\
+    always @(posedge clk or negedge reset_n) begin\
+        if (!reset_n) begin\
+            R_curr <= K_anchor;     // Resync tilaan 
+\f1 \uc0\u55349 \u56642 
+\f0 \
+            M_out  <= 512'b0;\
+        end else begin\
+            if (L_lock) begin\
+                // Ehj\'e4 ketju: 
+\f1 \uc0\u55349 \u56644 
+\f0  = rot, 
+\f2 \uc0\u8477 
+\f0 _next = 
+\f1 \uc0\u55349 \u56644 
+\f0 \
+                M_out  <= R_rot;\
+                R_curr <= R_rot;\
+            end else begin\
+                // Virhetila: 
+\f1 \uc0\u55349 \u56644 
+\f0  = Kohina, 
+\f2 \uc0\u8477 
+\f0 _next = 
+\f1 \uc0\u55349 \u56642 
+\f0 \
+                M_out  <= prng_noise ^ (K_anchor ^ delta_dyn);\
+                R_curr <= K_anchor;\
+            end\
+        end\
+    end\
+\
+endmodule\
+}

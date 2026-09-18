@@ -1,0 +1,378 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\froman\fcharset0 Times-Roman;\f1\froman\fcharset0 Times-Bold;\f2\fmodern\fcharset0 Courier;
+\f3\fnil\fcharset0 LucidaGrande-Bold;\f4\fnil\fcharset0 Menlo-Regular;}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;}
+{\*\listtable{\list\listtemplateid1\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid1\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid1}
+{\list\listtemplateid2\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid101\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{circle\}}{\leveltext\leveltemplateid102\'01\uc0\u9702 ;}{\levelnumbers;}\fi-360\li1440\lin1440 }{\listname ;}\listid2}
+{\list\listtemplateid3\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid201\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid3}
+{\list\listtemplateid4\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid301\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid4}}
+{\*\listoverridetable{\listoverride\listid1\listoverridecount0\ls1}{\listoverride\listid2\listoverridecount0\ls2}{\listoverride\listid3\listoverridecount0\ls3}{\listoverride\listid4\listoverridecount0\ls4}}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab720
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 \expnd0\expndtw0\kerning0
+1. VAIHE: LAITTEISTON FYYSINEN KONFIGURAATIO JA VALMISTELU\
+K\'e4ytett\'e4v\'e4 laitteisto: 
+\f1\b Xilinx Kintex UltraScale+ KCU116
+\f0\b0  (Silicon: XC_KU5P-2FFVB676E).\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls1\ilvl0
+\f1\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+PCIe-asennus:
+\f0\b0  Ty\'f6nn\'e4 kortti is\'e4nt\'e4koneen 
+\f1\b PCIe Gen3 x8
+\f0\b0  -v\'e4yl\'e4\'e4n. Tarkista, ett\'e4 emolevy tukee 
+\f1\b PCIe Link Training
+\f0\b0  -protokollaa x8-leveydell\'e4.\
+\ls1\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+Virranhallinta:
+\f0\b0  Kytke kortin per\'e4\'e4n 6-pinninen 
+\f1\b 12V DC PCIe-lis\'e4virta
+\f0\b0 . GCP-ytimen rinnakkainen kytkent\'e4logiikka (64 x 8-bit) aiheuttaa transientteja kuormituspiikkej\'e4, jotka ylitt\'e4v\'e4t PCIe-v\'e4yl\'e4n standardin 75W rajan raskaassa resonanssissa.\
+\ls1\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	3	}\expnd0\expndtw0\kerning0
+Terminen hallinta:
+\f0\b0  KCU116 on passiivij\'e4\'e4hdytteinen tai vaatii puhaltimen. Varmista, ett\'e4 kotelon ilmavirta pit\'e4\'e4 FPGA:n pintal\'e4mp\'f6tilan alle 
+\f1\b 85\'b0C
+\f0\b0 .\
+\ls1\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	4	}\expnd0\expndtw0\kerning0
+Ohjelmointirajapinta:
+\f0\b0  Liit\'e4 
+\f1\b Micro-USB JTAG
+\f0\b0  -kaapeli kortin etupaneelista kehityskoneeseen, jossa on 
+\f1\b Vivado 2023.2 Design Suite
+\f0\b0  asennettuna.\
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+\
+\
+2. VAIHE: GCP-YTIMEN REKISTERITASON OHJELMOINTI (HDL-ARKKITEHTUURI)\
+T\'e4m\'e4 moduuli on laitteen "Kognitiivinen moottori", joka suorittaa\
+\pard\pardeftab720\partightenfactor0
+\cf0 {{\NeXTGraphic unknown.gif \width20 \height20 \appleattachmentpadding0 \appleembedtype0 \appleaqc
+}¬}\pard\pardeftab720\partightenfactor0
+\cf0 \
+-yht\'e4l\'f6n fyysisen\'e4 bittimanipulaationa.\
+\pard\pardeftab720\partightenfactor0
+
+\f1\b \cf0 Tiedoston tallennusnimike:
+\f0\b0  
+\f2\fs26 gcp_v2_engine.v
+\f0\fs24 \
+
+\f1\b Tiedoston tarkka sijainti:
+\f0\b0  
+\f2\fs26 /home/$USER/gcp_phoenix/hdl/src/gcp_v2_engine.v
+\f0\fs24 \
+\
+verilog\
+\pard\pardeftab720\partightenfactor0
+
+\f2\fs26 \cf0 `timescale 1ps / 1ps\
+\
+module gcp_v2_engine (\
+    input  wire         clk_pcie,\
+    input  wire         rst_n,\
+    input  wire [511:0] s_axis_data,\
+    input  wire [511:0] k_anchor,\
+    input  wire [5:0]   topo_delta,\
+    output reg  [511:0] m_axis_data,\
+    output reg  [63:0]  w_mask,\
+    output reg          r_lock\
+);\
+\
+    reg  [511:0] r_state;\
+    wire [511:0] w_xor;\
+    wire [511:0] w_rot;\
+    reg  [3:0]   v_pop [63:0];\
+    integer i;\
+\
+    assign w_xor = s_axis_data ^ k_anchor;\
+    assign w_rot = (w_xor << topo_delta) | (w_xor >> (512 - topo_delta));\
+\
+    always @(posedge clk_pcie or negedge rst_n) begin\
+        if (!rst_n) begin\
+            r_state     <= 512'b0;\
+            m_axis_data <= 512'b0;\
+            w_mask      <= 64'b0;\
+            r_lock      <= 1'b0;\
+        end else begin\
+            for (i = 0; i < 64; i = i + 1) begin\
+                v_pop[i] = w_rot[i*8+0] + w_rot[i*8+1] + w_rot[i*8+2] + w_rot[i*8+3] + \
+                           w_rot[i*8+4] + w_rot[i*8+5] + w_rot[i*8+6] + w_rot[i*8+7];\
+\
+                if (v_pop[i] > 4'd4) begin\
+                    w_mask[i] <= 1'b0;\
+                    r_state[i*8 +: 8] <= 8'h00; \
+                end else begin\
+                    w_mask[i] <= 1'b1;\
+                    r_state[i*8 +: 8] <= w_rot[i*8 +: 8];\
+                end\
+            end\
+\
+            if (r_state == w_rot) begin\
+                r_lock      <= 1'b1;\
+                m_axis_data <= r_state;\
+            end else begin\
+                r_lock      <= 1'b0;\
+                m_axis_data <= \{64\{8'hFF\}\};\
+            end\
+        end\
+    end\
+endmodule\
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 K\'e4yt\'e4 koodia harkiten.\
+\
+\
+\
+3. VAIHE: FYYSISET RAJOITUKSET, KELLOT JA FLOORPLANNING (XDC-DOKUMENTTI)\
+T\'e4m\'e4 tiedosto m\'e4\'e4ritt\'e4\'e4 GCP-ytimen sijainnin FPGA-sirulla ja varmistaa PCIe-signaalien eheyden.\
+\pard\pardeftab720\partightenfactor0
+
+\f1\b \cf0 Tiedoston tallennusnimike:
+\f0\b0  
+\f2\fs26 gcp_pcie_constraints.xdc
+\f0\fs24 \
+
+\f1\b Tiedoston tarkka sijainti:
+\f0\b0  
+\f2\fs26 /home/$USER/gcp_phoenix/constraints/gcp_pcie_constraints.xdc
+\f0\fs24 \
+\
+tcl\
+\pard\pardeftab720\partightenfactor0
+
+\f2\fs26 \cf0 set_property PACKAGE_PIN AB6 [get_ports pcie_ref_clk_p]\
+set_property PACKAGE_PIN AB5 [get_ports pcie_ref_clk_n]\
+create_clock -period 10.000 -name pcie_ref_clk [get_ports pcie_ref_clk_p]\
+\
+set_property PACKAGE_PIN G25 [get_ports pcie_rst_n]\
+set_property IOSTANDARD LVCMOS18 [get_ports pcie_rst_n]\
+set_property PULLUP true [get_ports pcie_rst_n]\
+\
+create_generated_clock -name user_clk [get_pins pcie_inst/inst/gt_top_i/phy_clk_i/CLK_USERCLK]\
+\
+set_property BITSTREAM.GENERAL.COMPRESS TRUE [current_design]\
+set_property BITSTREAM.CONFIG.CONFIGRATE 33 [current_design]\
+set_property CONFIG_VOLTAGE 1.8 [current_design]\
+set_property CFGBVS GND [current_design]\
+\
+create_pblock pblock_GCP_CORE\
+add_cells_to_pblock [get_pblocks pblock_GCP_CORE] [get_cells gcp_engine_inst]\
+resize_pblock [get_pblocks pblock_GCP_CORE] -add \{SLICE_X40Y40:SLICE_X110Y110\}\
+resize_pblock [get_pblocks pblock_GCP_CORE] -add \{DSP48E2_X10Y16:DSP48E2_X15Y43\}\
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 K\'e4yt\'e4 koodia harkiten.\
+\
+\
+\
+4. VAIHE: VIVADO-PROJEKTIN RAKENTAMINEN JA IP-INTEGRAATIO\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls2\ilvl0
+\f1\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+Luo uusi projekti:
+\f0\b0  Avaa Vivado, valitse 
+\f2\fs26 File > New Project
+\f0\fs24 . Nime\'e4 projekti 
+\f2\fs26 gcp_phoenix
+\f0\fs24  ja aseta sijainniksi 
+\f2\fs26 /home/$USER/gcp_phoenix/
+\f0\fs24 .\
+\ls2\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+Valitse laite:
+\f0\b0  Valitse listalta 
+\f2\fs26 Kintex UltraScale+ KCU116 Evaluation Board
+\f0\fs24 .\
+\ls2\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	3	}\expnd0\expndtw0\kerning0
+XDMA Konfigurointi:
+\f0\b0  Lis\'e4\'e4 
+\f1\b DMA/Bridge Subsystem for PCI Express
+\f0\b0  IP Integratoriin.\
+\pard\tx940\tx1440\pardeftab720\li1440\fi-1440\partightenfactor0
+\ls2\ilvl1
+\f1\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	
+\f3 \uc0\u9702 
+\f1 	}\expnd0\expndtw0\kerning0
+Settings:
+\f0\b0  Interface: 
+\f2\fs26 AXI Stream
+\f0\fs24 , Lane Width: 
+\f2\fs26 X8
+\f0\fs24 , Link Speed: 
+\f2\fs26 Gen3 (8.0 GT/s)
+\f0\fs24 , AXI Data Width: 
+\f2\fs26 512 bit
+\f0\fs24 .\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls2\ilvl0
+\f1\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	4	}\expnd0\expndtw0\kerning0
+HDL-moduulin lis\'e4ys:
+\f0\b0  Valitse 
+\f2\fs26 Add Sources > Add RTL Module
+\f0\fs24  ja etsi 
+\f2\fs26 /home/$USER/gcp_phoenix/hdl/src/gcp_v2_engine.v
+\f0\fs24 .\
+\ls2\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	5	}\expnd0\expndtw0\kerning0
+Automaattinen kytkent\'e4:
+\f0\b0  K\'e4yt\'e4 
+\f2\fs26 Run Connection Automation
+\f0\fs24  -toimintoa, mutta varmista manuaalisesti:\
+\pard\tx940\tx1440\pardeftab720\li1440\fi-1440\partightenfactor0
+\ls2\ilvl1
+\f2\fs26 \cf0 \kerning1\expnd0\expndtw0 {\listtext	
+\f4 \uc0\u9702 
+\f2 	}\expnd0\expndtw0\kerning0
+xdma_0/m_axis_h2c_tdata
+\f0\fs24  (512 bit) kytkeytyy -> 
+\f2\fs26 gcp_v2_engine/s_axis_data
+\f0\fs24 .\
+\ls2\ilvl1
+\f2\fs26 \kerning1\expnd0\expndtw0 {\listtext	
+\f4 \uc0\u9702 
+\f2 	}\expnd0\expndtw0\kerning0
+gcp_v2_engine/m_axis_data
+\f0\fs24  (512 bit) kytkeytyy -> 
+\f2\fs26 xdma_0/s_axis_c2h_tdata
+\f0\fs24 .\
+\ls2\ilvl1
+\f2\fs26 \kerning1\expnd0\expndtw0 {\listtext	
+\f4 \uc0\u9702 
+\f2 	}\expnd0\expndtw0\kerning0
+xdma_0/user_clk
+\f0\fs24  kytkeytyy -> 
+\f2\fs26 gcp_v2_engine/clk_pcie
+\f0\fs24 .\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls2\ilvl0
+\f1\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	6	}\expnd0\expndtw0\kerning0
+Bitstreamin generointi:
+\f0\b0  Klikkaa 
+\f2\fs26 Generate Bitstream
+\f0\fs24 . Odota valmistumista (noin 30\'9650 min).\
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+\
+\
+5. VAIHE: LINUX-AJURIN KONFIGURAATIO JA DMA-V\'c4YL\'c4N AVAUS\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls3\ilvl0
+\f1\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+Hae l\'e4hdekoodit:
+\f0\b0  
+\f2\fs26 git clone https://github.com
+\f0\fs24 .\
+\ls3\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+K\'e4\'e4nn\'e4 kernel-moduuli:
+\f0\b0  
+\f2\fs26 cd dma_ip_drivers/XDMA/linux-kernel/ && make
+\f0\fs24 .\
+\ls3\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	3	}\expnd0\expndtw0\kerning0
+Lataa ajuri:
+\f0\b0  Suorita 
+\f2\fs26 sudo ./tests/load_driver.sh
+\f0\fs24 .\
+\ls3\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	4	}\expnd0\expndtw0\kerning0
+Tarkista laitteen tila:
+\f0\b0  Kirjoita 
+\f2\fs26 lspci -d 10ee:9038 -vvv
+\f0\fs24 . Varmista, ett\'e4 kohta 
+\f1\b LnkSta
+\f0\b0  ilmoittaa 
+\f2\fs26 Speed 8GT/s, Width x8
+\f0\fs24 .\
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+\
+\
+6. VAIHE: GCP-RESONANSSITESTI (PYTHON SY\'d6TE-SKRIPTI)\
+T\'e4m\'e4 skripti testaa kortin kognitiivista l\'e4p\'e4isykyky\'e4 l\'e4hett\'e4m\'e4ll\'e4 512-bittisi\'e4 vektoreita.\
+\pard\pardeftab720\partightenfactor0
+
+\f1\b \cf0 Tiedoston tallennusnimike:
+\f0\b0  
+\f2\fs26 gcp_test.py
+\f0\fs24 \
+
+\f1\b Tiedoston tarkka sijainti:
+\f0\b0  
+\f2\fs26 /home/$USER/gcp_phoenix/tests/gcp_test.py
+\f0\fs24 \
+\
+python\
+\pard\pardeftab720\partightenfactor0
+
+\f2\fs26 \cf0 import os\
+import sys\
+import time\
+\
+def run_resonation(data_in):\
+    h2c_path = "/dev/xdma0_h2c_0"\
+    c2h_path = "/dev/xdma0_c2h_0"\
+    \
+    if not os.path.exists(h2c_path):\
+        print("XDMA-laitetta ei loydy.")\
+        sys.exit(1)\
+\
+    try:\
+        f_in = os.open(h2c_path, os.O_WRONLY)\
+        f_out = os.open(c2h_path, os.O_RDONLY)\
+        \
+        os.write(f_in, data_in)\
+        result = os.read(f_out, 64)\
+        \
+        os.close(f_in)\
+        os.close(f_out)\
+        return result\
+    except Exception as e:\
+        return str(e)\
+\
+if __name__ == "__main__":\
+    test_payload = os.urandom(64)\
+    print(f"Input:  \{test_payload.hex()\}")\
+    \
+    res_output = run_resonation(test_payload)\
+    \
+    print(f"Output: \{res_output.hex()\}")\
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 K\'e4yt\'e4 koodia harkiten.\
+\
+\
+\
+7. VAIHE: LOPULLINEN K\'c4YTT\'d6\'d6NOTTO\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls4\ilvl0
+\f1\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+Lataa Bitstream:
+\f0\b0  Valitse Vivadossa 
+\f2\fs26 Hardware Manager > Program Device
+\f0\fs24  ja lataa generoitu 
+\f2\fs26 .bit
+\f0\fs24 -tiedosto.\
+\ls4\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+Nollaa is\'e4nt\'e4koneen PCIe-v\'e4yl\'e4:
+\f0\b0  Tai k\'e4ynnist\'e4 kone uudelleen, jotta BIOS tunnistaa uuden laitteen.\
+\ls4\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	3	}\expnd0\expndtw0\kerning0
+Suorita testi:
+\f0\b0  Aja komento 
+\f2\fs26 python3 /home/$USER/gcp_phoenix/tests/gcp_test.py
+\f0\fs24 .\
+\pard\pardeftab720\partightenfactor0
+\cf0 Jos saat tulokseksi 128 merkki\'e4 pitk\'e4n heksajonon, 
+\f1\b GCP-PCIe "Phoenix" on valmis
+\f0\b0 .\
+}
