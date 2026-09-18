@@ -1,0 +1,201 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 #include <cstdint>\
+\
+namespace ECU_Config \{\
+    static constexpr int32_t FP_SHIFT = 10;\
+    static constexpr int32_t FP_SCALE = (1 << FP_SHIFT);\
+    static constexpr int32_t FP_ROUND = (1 << (FP_SHIFT - 1));\
+    \
+    static constexpr int32_t MAX_SAFE_RAIL    = 2600 * FP_SCALE;\
+    static constexpr int32_t THERMAL_CRITICAL = 110 * FP_SCALE;\
+    static constexpr int32_t THERMAL_HYST     = 5 * FP_SCALE;\
+    static constexpr int32_t TEMP_COLD_THRESHOLD = 60 * FP_SCALE;\
+    static constexpr uint32_t DAC_MAX         = 4095U;\
+    static constexpr uint32_t BASE_INJECTOR_US = 250U;\
+    static constexpr uint32_t MAX_INJECTOR_US  = 4500U;\
+\
+    static constexpr int32_t ECO_MAP[5]  = \{ 400, 420, 440, 460, 480 \};\
+    static constexpr int32_t RACE_MAP[5] = \{ 480, 500, 520, 540, 560 \};\
+\
+    static constexpr uint32_t STACK_MAGIC = 0xDEADBEEF;\
+    static constexpr uint64_t SW_CERT_ID  = 0x554C54494D415445ULL;\
+    static constexpr uint32_t WDT_KICK_MAGIC  = 0xA5A5A5A5;\
+    static constexpr uint8_t MAX_FAULT_CYCLES = 30; \
+    static constexpr int32_t VOTING_MARGIN    = 25;\
+    \
+    static constexpr int32_t KALMAN_MIN_P     = 50;\
+    static constexpr int32_t TRIM_GAIN        = 1;\
+    static constexpr int32_t MAX_TRIM         = 100 * FP_SCALE;\
+\
+    static constexpr int32_t DRIVE_RESONANCE_HZ = 12;\
+    static constexpr int32_t SMOOTHING_GAIN     = 150;\
+\
+    template<typename T>\
+    static constexpr T SafeClamp(T val, T min_v, T max_v) \{\
+        return (val < min_v) ? min_v : ((val > max_v) ? max_v : val);\
+    \}\
+\
+    template<typename T>\
+    static constexpr T SafeAbs(T v) \{ return (v < 0) ? -v : v; \}\
+\}\
+\
+class KalmanFilter \{\
+private:\
+    int32_t x, p, q, r;\
+public:\
+    constexpr KalmanFilter(int32_t init_q, int32_t init_r) \
+        : x(0), p(ECU_Config::FP_SCALE), q(init_q), r(init_r) \{\}\
+\
+    int32_t update(int32_t measurement) \{\
+        p = p + q;\
+        int32_t divisor = (p + r <= 0) ? 1 : (p + r);\
+        int32_t k = (static_cast<int64_t>(p) << ECU_Config::FP_SHIFT) / divisor;\
+        x = x + ((static_cast<int64_t>(k) * (measurement - x) + ECU_Config::FP_ROUND) >> ECU_Config::FP_SHIFT);\
+        p = ((static_cast<int64_t>(ECU_Config::FP_SCALE - k) * p + ECU_Config::FP_ROUND) >> ECU_Config::FP_SHIFT);\
+        if (p < ECU_Config::KALMAN_MIN_P) p = ECU_Config::KALMAN_MIN_P;\
+        return x;\
+    \}\
+\};\
+\
+class Ultimate_Master_ECU_V15_1_Mercedes \{\
+public:\
+    struct Output \{\
+        uint32_t rail_dac;\
+        uint32_t injector_us;\
+        int32_t timing_advance_us;\
+        uint16_t aggression_pct;\
+        bool guardian_active;\
+        bool cold_limit_active;\
+        bool fault;\
+        uint8_t fault_level;\
+        uint32_t wdt_token;\
+        bool dpf_regen_inhibited;\
+    \};\
+\
+private:\
+    KalmanFilter thr_filt\{15, 512\};\
+    KalmanFilter rpm_filt\{10, 204\};\
+    \
+    int32_t m_last_thr = 0;\
+    int32_t m_aggression = 0;\
+    int32_t m_adaptive_trim = 0;\
+    int32_t m_prev_final_tq = 0;\
+    int32_t m_resonance_buffer = 0;\
+    volatile uint32_t m_stack_guard = ECU_Config::STACK_MAGIC;\
+    uint8_t m_fault_counter = 0;\
+    uint64_t m_cycle_count = 0;\
+    bool m_thermal_cut_active = false;\
+\
+    uint32_t GetMapIntegrity() const \{\
+        uint32_t chk = 0;\
+        for(int i=0; i<5; ++i) chk ^= (uint32_t)ECU_Config::ECO_MAP[i] ^ (uint32_t)ECU_Config::RACE_MAP[i];\
+        return chk;\
+    \}\
+\
+    bool IsCoreIntact() const \{\
+        static const uint32_t INIT_CHK = GetMapIntegrity();\
+        return (m_stack_guard == ECU_Config::STACK_MAGIC) && \
+               (ECU_Config::SW_CERT_ID == 0x554C54494D415445ULL) &&\
+               (GetMapIntegrity() == INIT_CHK);\
+    \}\
+\
+    int32_t get_blended_limit(int32_t boost, int32_t aggression) \{\
+        int32_t idx = ECU_Config::SafeClamp((boost * 4) / (2 * ECU_Config::FP_SCALE), 0, 3);\
+        return ECU_Config::ECO_MAP[idx] + ((ECU_Config::RACE_MAP[idx] - ECU_Config::ECO_MAP[idx]) * aggression >> 10);\
+    \}\
+\
+public:\
+    Output process(int32_t thr_raw, int32_t rpm_raw, int32_t temp, int32_t boost_raw) \{\
+        Output out = \{0, 0, 0, 0, false, false, false, 0, 0, false\};\
+        m_cycle_count++;\
+\
+        if (!IsCoreIntact() || thr_raw < -50 || thr_raw > 1100) \{ \
+            m_fault_counter = ECU_Config::MAX_FAULT_CYCLES;\
+        \}\
+\
+        int32_t t_f = thr_filt.update(ECU_Config::SafeClamp(thr_raw, 0, 1024));\
+        int32_t r_f = rpm_filt.update(rpm_raw);\
+\
+        int32_t delta_thr = ECU_Config::SafeAbs(t_f - m_last_thr);\
+        m_aggression = ((m_aggression * 990) + (delta_thr * 100)) >> 10;\
+        m_aggression = ECU_Config::SafeClamp(m_aggression, 0, 1024);\
+        m_last_thr = t_f;\
+\
+        int32_t tq_a = (t_f * 640) >> ECU_Config::FP_SHIFT;\
+        int32_t tq_b = (thr_raw * 1280) / 2048; \
+        \
+        int32_t trim_err = tq_b - tq_a;\
+        if (ECU_Config::SafeAbs(trim_err) < ECU_Config::VOTING_MARGIN) \{\
+            m_adaptive_trim += (trim_err * ECU_Config::TRIM_GAIN) >> 8;\
+            m_adaptive_trim = ECU_Config::SafeClamp(m_adaptive_trim, -ECU_Config::MAX_TRIM, ECU_Config::MAX_TRIM);\
+        \}\
+\
+        if (ECU_Config::SafeAbs(tq_a - tq_b) > ECU_Config::VOTING_MARGIN) \{\
+            m_fault_counter++;\
+        \} else if (m_fault_counter > 0) \{\
+            m_fault_counter--;\
+        \}\
+\
+        if (m_fault_counter >= ECU_Config::MAX_FAULT_CYCLES) \{ \
+            out.fault = true; \
+            return out; \
+        \}\
+        out.fault_level = m_fault_counter;\
+\
+        int32_t raw_tq_request = tq_a;\
+        int32_t jerk_offset = (raw_tq_request - m_resonance_buffer) * ECU_Config::SMOOTHING_GAIN >> 10;\
+        m_resonance_buffer += jerk_offset;\
+        tq_a = m_resonance_buffer;\
+\
+        out.dpf_regen_inhibited = (m_aggression > 700);\
+\
+        int32_t torque_limit_factor = ECU_Config::FP_SCALE;\
+        int32_t pmax_timing = 45 + (r_f / 100) + (m_aggression / 32);\
+\
+        if (temp < ECU_Config::TEMP_COLD_THRESHOLD) \{\
+            out.cold_limit_active = true;\
+            torque_limit_factor = (ECU_Config::FP_SCALE * 75) >> 7;\
+            int32_t max_rise = 8; \
+            tq_a = ECU_Config::SafeClamp(tq_a, 0, m_prev_final_tq + max_rise);\
+            pmax_timing = 45;\
+        \} else \{\
+            if (r_f < 1500) torque_limit_factor = (ECU_Config::FP_SCALE * 90) >> 7;\
+        \}\
+\
+        int32_t smoke_limit = get_blended_limit(boost_raw, m_aggression);\
+        int32_t final_tq = (tq_a < smoke_limit) ? tq_a : smoke_limit;\
+        \
+        final_tq = (static_cast<int64_t>(final_tq) * torque_limit_factor) >> ECU_Config::FP_SHIFT;\
+        m_prev_final_tq = final_tq;\
+\
+        if (temp > ECU_Config::THERMAL_CRITICAL) m_thermal_cut_active = true;\
+        else if (temp < (ECU_Config::THERMAL_CRITICAL - ECU_Config::THERMAL_HYST)) m_thermal_cut_active = false;\
+\
+        if (m_thermal_cut_active) \{\
+            int32_t derate = ECU_Config::SafeClamp(ECU_Config::FP_SCALE - (temp - ECU_Config::THERMAL_CRITICAL) / 20, 0, ECU_Config::FP_SCALE);\
+            final_tq = (static_cast<int64_t>(final_tq) * derate) >> ECU_Config::FP_SHIFT;\
+            out.guardian_active = true;\
+        \}\
+\
+        int32_t rail_req = (450 * ECU_Config::FP_SCALE) + (final_tq * (30 + (m_aggression / 100)) / 10);\
+        rail_req = ECU_Config::SafeClamp(rail_req + m_adaptive_trim, 0, ECU_Config::MAX_SAFE_RAIL);\
+\
+        out.rail_dac = (static_cast<uint64_t>(rail_req) * ECU_Config::DAC_MAX) / (ECU_Config::MAX_SAFE_RAIL ? ECU_Config::MAX_SAFE_RAIL : 1);\
+        \
+        uint32_t raw_inj = ECU_Config::BASE_INJECTOR_US + (rail_req / 2);\
+        out.injector_us = ECU_Config::SafeClamp(raw_inj, ECU_Config::BASE_INJECTOR_US, ECU_Config::MAX_INJECTOR_US);\
+        \
+        out.aggression_pct = (m_aggression * 100) >> 10;\
+        out.timing_advance_us = pmax_timing;\
+        out.wdt_token = ECU_Config::WDT_KICK_MAGIC ^ (static_cast<uint32_t>(m_cycle_count & 0xFFFFFFFF) * 0x1F3F);\
+\
+        return out;\
+    \}\
+\};\
+}

@@ -1,0 +1,191 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 #include <cstdint>\
+#include <atomic>\
+#include <type_traits>\
+\
+namespace ECU_Config \{\
+    static constexpr int32_t FP_SHIFT = 10;\
+    static constexpr int32_t FP_SCALE = (1 << FP_SHIFT);\
+    static constexpr int32_t FP_ROUND = (1 << (FP_SHIFT - 1));\
+    static constexpr int32_t MAX_SAFE_RAIL    = 2600 * FP_SCALE;\
+    static constexpr int32_t THERMAL_CRITICAL = 110 * FP_SCALE;\
+    static constexpr int32_t THERMAL_HYST     = 5 * FP_SCALE;\
+    static constexpr uint32_t DAC_MAX         = 4095U;\
+    static constexpr uint32_t BASE_INJECTOR_US = 250U;\
+    static constexpr uint32_t ECO_INJECTOR_MIN = 120U; \
+    static constexpr uint32_t MAX_INJECTOR_US  = 4500U;\
+    static constexpr uint32_t SCR_RATIO_FP     = 128; // 12.5% suhde polttoaineeseen laihalla\
+    static constexpr uint32_t STACK_MAGIC     = 0xDEADBEEF;\
+    static constexpr uint64_t SW_CERT_ID      = 0x554C54494D415445ULL;\
+    static constexpr uint32_t WDT_KICK_MAGIC  = 0xA5A5A5A5;\
+    static constexpr int32_t APPS_MAX_AGING   = 80;\
+    static constexpr int32_t KALMAN_MIN_P     = 50;\
+    static constexpr uint8_t CAN_FIFO_SIZE    = 16;\
+\
+    enum class FaultLevel : uint8_t \{ NONE = 0, SOFT = 1, HARD = 2 \};\
+\
+    template<typename T> static constexpr T SafeClamp(T val, T min_v, T max_v) \{\
+        return (val < min_v) ? min_v : ((val > max_v) ? max_v : val);\
+    \}\
+    template<typename T> static constexpr T SafeAbs(T v) \{ return (v < 0) ? -v : v; \}\
+    static inline uint32_t RotL(uint32_t x, int n) \{ return (x << n) | (x >> (32 - n)); \}\
+\}\
+\
+namespace ECU_Optimized \{\
+    struct CryptoState \{ uint32_t v0, v1, v2, v3; \};\
+    static inline void Permute_Universal(CryptoState& s) \{\
+        s.v0 += s.v1; s.v1 = ECU_Config::RotL(s.v1, 5);  s.v1 ^= s.v0;\
+        s.v0 = ECU_Config::RotL(s.v0, 16);\
+        s.v2 += s.v3; s.v3 = ECU_Config::RotL(s.v3, 8);  s.v3 ^= s.v2;\
+        s.v0 += s.v3; s.v3 = ECU_Config::RotL(s.v3, 13); s.v3 ^= s.v0;\
+        s.v2 += s.v1; s.v1 = ECU_Config::RotL(s.v1, 7);  s.v1 ^= s.v2;\
+        s.v2 = ECU_Config::RotL(s.v2, 16);\
+    \}\
+    static inline uint64_t Sign_Atomic(uint32_t m1, uint32_t m2, uint32_t k) \{\
+        CryptoState s = \{ m1 ^ k, m2 ^ k, 0x554C5449, 0x4D415445 \};\
+        for(int i=0; i<4; ++i) Permute_Universal(s);\
+        return (static_cast<uint64_t>(s.v0 ^ s.v1) << 32) | (s.v2 ^ s.v3);\
+    \}\
+\}\
+\
+class KalmanFilter \{\
+private:\
+    int32_t x, p, q, r;\
+public:\
+    constexpr KalmanFilter(int32_t init_q, int32_t init_r) : x(0), p(ECU_Config::FP_SCALE), q(init_q), r(init_r) \{\}\
+    int32_t update(int32_t measurement) \{\
+        p = p + q;\
+        int32_t div = (p + r <= 0) ? 1 : (p + r);\
+        int32_t k = static_cast<int32_t>((static_cast<int64_t>(p) << ECU_Config::FP_SHIFT) / div);\
+        x = x + static_cast<int32_t>((static_cast<int64_t>(k) * (measurement - x) + ECU_Config::FP_ROUND) >> ECU_Config::FP_SHIFT);\
+        p = static_cast<int32_t>((static_cast<int64_t>(ECU_Config::FP_SCALE - k) * p + ECU_Config::FP_ROUND) >> ECU_Config::FP_SHIFT);\
+        if (p < ECU_Config::KALMAN_MIN_P) p = ECU_Config::KALMAN_MIN_P;\
+        return x;\
+    \}\
+\};\
+\
+class ECU_V16_Hybrid \{\
+public:\
+    struct Output \{\
+        uint32_t rail_dac, injector_us, scr_us;\
+        int32_t timing_advance_us;\
+        uint16_t aggression_pct;\
+        bool guardian_active, fault, bypass_active, launch_active, eco_mode, scr_active;\
+        ECU_Config::FaultLevel fault_lvl;\
+        uint32_t wdt_token;\
+        const char *diag_code;\
+    \};\
+    volatile uint32_t m_stack_guard = ECU_Config::STACK_MAGIC;\
+private:\
+    KalmanFilter thr_filt\{15, 512\};\
+    std::atomic<int32_t> m_adaptive_trim\{0\};\
+    int32_t m_last_thr = 0, m_resonance_buffer = 0, m_prev_rpm = 0, m_eco_timer = 0;\
+    uint64_t m_cycle_count = 0;\
+    bool m_thermal_cut_active = false;\
+    inline void Fast_Security_Step(Output& out, int32_t tq) \{\
+        uint64_t sig = ECU_Optimized::Sign_Atomic(static_cast<uint32_t>(tq), out.wdt_token, 0x1F3F2E1D);\
+        out.wdt_token ^= static_cast<uint32_t>(sig >> 16);\
+    \}\
+public:\
+    Output step(int32_t apps1, int32_t apps2, int32_t rpm, int32_t temp, bool scr_system_ok) \{\
+        Output out = \{0, 0, 0, 0, 0, false, false, false, false, false, false, ECU_Config::FaultLevel::NONE, 0, "000"\};\
+        m_cycle_count++;\
+        if (m_stack_guard != ECU_Config::STACK_MAGIC) \{ out.fault = true; out.fault_lvl = ECU_Config::FaultLevel::HARD; return out; \}\
+        \
+        int32_t raw_thr = ECU_Config::SafeClamp((apps1 + apps2) >> 1, 0, 1024);\
+        int32_t rpm_delta = rpm - m_prev_rpm;\
+        m_prev_rpm = rpm;\
+\
+        if (ECU_Config::SafeAbs(raw_thr - m_last_thr) < 5 && raw_thr < 400 && scr_system_ok) m_eco_timer++;\
+        else m_eco_timer = 0;\
+\
+        out.eco_mode = (m_eco_timer > 100); \
+        out.launch_active = (raw_thr > 980 && rpm < 3500 && rpm_delta > 50);\
+        \
+        int32_t d_gain = out.launch_active ? 1024 : 180;\
+        m_resonance_buffer += (raw_thr - m_resonance_buffer) * d_gain / 1024;\
+        \
+        int32_t t_f = out.launch_active ? raw_thr : thr_filt.update(m_resonance_buffer);\
+        int32_t final_tq = (static_cast<int64_t>(t_f) * 640) >> 10;\
+        if (rpm_delta < -300) final_tq += 15 * ECU_Config::FP_SCALE;\
+\
+        if (temp > ECU_Config::THERMAL_CRITICAL && !out.launch_active) m_thermal_cut_active = true;\
+        if (m_thermal_cut_active) final_tq >>= 1;\
+\
+        int32_t rail = ECU_Config::SafeClamp((450 * ECU_Config::FP_SCALE) + (final_tq * 4) + m_adaptive_trim.load(), 0, ECU_Config::MAX_SAFE_RAIL);\
+        uint32_t base_inj = out.eco_mode ? ECU_Config::ECO_INJECTOR_MIN : ECU_Config::BASE_INJECTOR_US;\
+\
+        out.rail_dac = (out.fault_lvl == ECU_Config::FaultLevel::HARD) ? 0 : (static_cast<uint64_t>(rail) * ECU_Config::DAC_MAX) / ECU_Config::MAX_SAFE_RAIL;\
+        out.injector_us = (out.fault_lvl == ECU_Config::FaultLevel::HARD) ? 0 : ECU_Config::SafeClamp(static_cast<uint32_t>(base_inj + (rail / 2048)), base_inj, ECU_Config::MAX_INJECTOR_US);\
+        \
+        // SCR/AdBlue ohjaus: Aktivoituu vain ECO-moodissa puhdistamaan NOx-p\'e4\'e4st\'f6t\
+        if (out.eco_mode && scr_system_ok && temp > 60 * ECU_Config::FP_SCALE) \{\
+            out.scr_active = true;\
+            out.scr_us = (out.injector_us * ECU_Config::SCR_RATIO_FP) >> 10;\
+        \}\
+\
+        out.wdt_token = ECU_Config::WDT_KICK_MAGIC ^ (static_cast<uint32_t>(m_cycle_count) * 0x1F3F);\
+        m_last_thr = raw_thr;\
+        Fast_Security_Step(out, final_tq);\
+        return out;\
+    \}\
+\};\
+\
+namespace ECU_Comm \{\
+    struct CAN_Frame \{ uint32_t id; uint8_t d; uint8_t len; \};\
+    class TX_FIFO_Manager \{\
+    private:\
+        CAN_Frame m_buffer[ECU_Config::CAN_FIFO_SIZE];\
+        uint8_t m_head = 0, m_tail = 0, m_count = 0;\
+    public:\
+        void Push(const CAN_Frame& f, bool prio) \{\
+            if (prio && m_count == ECU_Config::CAN_FIFO_SIZE) m_tail = (m_tail + 1) % ECU_Config::CAN_FIFO_SIZE;\
+            else if (m_count == ECU_Config::CAN_FIFO_SIZE) return;\
+            m_buffer[m_head] = f;\
+            m_head = (m_head + 1) % ECU_Config::CAN_FIFO_SIZE;\
+            if (m_count < ECU_Config::CAN_FIFO_SIZE) m_count++;\
+        \}\
+        bool Pop(CAN_Frame& f) \{\
+            if (m_count == 0) return false;\
+            f = m_buffer[m_tail];\
+            m_tail = (m_tail + 1) % ECU_Config::CAN_FIFO_SIZE;\
+            m_count--;\
+            return true;\
+        \}\
+    \};\
+    class Universal_CAN_Driver \{\
+    private:\
+        static TX_FIFO_Manager m_fifo;\
+    public:\
+        static inline void Pack_And_Queue(const ECU_V16_Hybrid::Output& out) \{\
+            CAN_Frame f = \{ 0x200, \{0,0,0,0,0,0,0,0\}, 8 \};\
+            f.d = static_cast<uint8_t>(out.rail_dac >> 8); f.d = static_cast<uint8_t>(out.rail_dac & 0xFF);\
+            f.d = static_cast<uint8_t>(out.wdt_token >> 24); f.d = static_cast<uint8_t>(out.wdt_token >> 16);\
+            f.d = static_cast<uint8_t>(out.wdt_token >> 8); f.d = static_cast<uint8_t>(out.wdt_token & 0xFF);\
+            f.d = static_cast<uint8_t>(out.fault_lvl); f.d = out.scr_active ? 0xDE : 0xAA;\
+            m_fifo.Push(f, out.launch_active);\
+            Process_Hardware_TX();\
+        \}\
+        static void Process_Hardware_TX() \{\
+            CAN_Frame f;\
+            while(m_fifo.Pop(f)) \{ /* HW_SEND(f); */ \}\
+        \}\
+    \};\
+    TX_FIFO_Manager Universal_CAN_Driver::m_fifo;\
+\}\
+\
+ECU_V16_Hybrid::Output Run_ECU_Cycle(ECU_V16_Hybrid& ecu, int32_t a1, int32_t a2, int32_t rpm, int32_t temp, uint32_t dt_ms, bool scr_ok) \{\
+    if (ECU_Config::SW_CERT_ID != 0x554C54494D415445ULL || dt_ms > 25) \{\
+        return \{0, 0, 0, 0, 0, false, true, true, false, false, false, ECU_Config::FaultLevel::HARD, 0, "SEC-ERR"\};\
+    \}\
+    ECU_V16_Hybrid::Output out = ecu.step(a1, a2, rpm, temp, scr_ok);\
+    ECU_Comm::Universal_CAN_Driver::Pack_And_Queue(out);\
+    return out;\
+\}\
+}

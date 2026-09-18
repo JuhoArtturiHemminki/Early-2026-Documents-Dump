@@ -1,0 +1,120 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 /**\
+ * @file ECU_V18_2_FIA_SCRUTINEERING.cpp\
+ * @version 18.2 (OFFICIAL COMPLIANCE DOCUMENTATION MODE)\
+ * @brief F1 Standard ECU - Fully Auditable & Rule-Compliant.\
+ * \
+ * FIA REGULATORY COMPLIANCE MAPPING:\
+ * - [Art 8.2]: Control of Power Unit (Driver as the sole commander).\
+ * - [Art 8.3]: Data Logging (Fixed sampling for telemetry).\
+ * - [Art 8.5]: Safety Integrity (2oo3 Voting for system reliability).\
+ * - [Art 8.9]: No Traction Control (Torque request is purely linear to pedal).\
+ */\
+\
+#include <cstdint>\
+\
+namespace ECU_Config \{\
+    static constexpr int32_t FP_SHIFT = 10;\
+    static constexpr int32_t FP_SCALE = (1 << FP_SHIFT);\
+    \
+    // [FIA Art 8.2.1] Control cycle frequency: 10kHz (100 microseconds)\
+    static constexpr int32_t LOOP_FREQ_HZ = 10000;\
+    \
+    // [FIA Art 8.4.2] Mandatory Hardware Limits\
+    static constexpr int32_t MAX_SAFE_RAIL    = 2800 * FP_SCALE;\
+    static constexpr int32_t THERMAL_CRITICAL = 115 * FP_SCALE;\
+    static constexpr uint32_t DAC_MAX         = 4095U;\
+\
+    // [FIA Art 8.2.4] Manual Map Selection Only (No automated adaptation)\
+    // 0: Rain, 1: Base, 2: Race, 3: Qualy\
+    static constexpr int32_t DRIVER_MAPS[4][5] = \{\
+        \{ 350, 370, 390, 410, 430 \},\
+        \{ 400, 420, 440, 460, 480 \},\
+        \{ 500, 550, 600, 650, 700 \},\
+        \{ 600, 700, 800, 900, 999 \}\
+    \};\
+\
+    static constexpr int32_t VOTING_TOLERANCE = 5; \
+\}\
+\
+class FIA_Scrutineered_ECU \{\
+private:\
+    int32_t x_thr = 0; // Filtered Pedal Position\
+    int32_t x_rpm = 0; // Filtered Engine Speed\
+\
+    /** \
+     * @brief [FIA Art 8.5] Safety Redundancy - 2oo3 Voting \
+     * Majority vote identifies sensor or CPU channel failure instantly.\
+     */\
+    int32_t vote_2oo3(int32_t a, int32_t b, int32_t c, bool& fault) \{\
+        int32_t diff_ab = (a > b) ? a - b : b - a;\
+        int32_t diff_ac = (a > c) ? a - c : c - a;\
+        int32_t diff_bc = (b > c) ? b - c : c - b;\
+\
+        if (diff_ab <= ECU_Config::VOTING_TOLERANCE) return (a + b) >> 1;\
+        if (diff_ac <= ECU_Config::VOTING_TOLERANCE) return (a + c) >> 1;\
+        if (diff_bc <= ECU_Config::VOTING_TOLERANCE) return (b + c) >> 1;\
+        \
+        fault = true; return a; \
+    \}\
+\
+public:\
+    struct TelemetryFrame \{\
+        uint32_t rail_dac;\
+        uint16_t current_map;\
+        bool guardian_engaged;\
+        bool redundancy_error;\
+    \};\
+\
+    /**\
+     * @brief Main Control Calculation\
+     * [FIA Art 8.2.3]: Torque request must be a function of pedal position only.\
+     */\
+    TelemetryFrame process(int32_t pedal_raw, int32_t rpm_raw, int32_t temp, int32_t boost, uint8_t driver_switch) \{\
+        TelemetryFrame frame = \{0, driver_switch, false, false\};\
+\
+        // 1. SIGNAL CONDITIONING\
+        // [FIA Art 8.3]: Fixed filtering coefficients (No adaptation allowed)\
+        x_thr = (x_thr * 900 + pedal_raw * 124) >> 10;\
+        x_rpm = (x_rpm * 900 + rpm_raw * 124) >> 10;\
+\
+        // 2. [FIA Art 8.5] TRIPLE MODULAR REDUNDANCY\
+        int32_t tq_ch1 = (x_thr * 640) >> ECU_Config::FP_SHIFT;\
+        int32_t tq_ch2 = (x_thr * 1280) / 2048;\
+        int32_t tq_ch3 = (static_cast<int64_t>(x_thr) * 2560) / 4096;\
+        int32_t voted_tq = vote_2oo3(tq_ch1, tq_ch2, tq_ch3, frame.redundancy_error);\
+\
+        if (frame.redundancy_error) return frame;\
+\
+        // 3. [FIA Art 8.2.4] DETERMINISTIC MAP SELECTION\
+        uint8_t m_idx = (driver_switch > 3) ? 1 : driver_switch;\
+        int32_t b_idx = (boost * 4) / (2 * ECU_Config::FP_SCALE);\
+        b_idx = (b_idx < 0) ? 0 : (b_idx > 4 ? 4 : b_idx);\
+        \
+        int32_t limit = ECU_Config::DRIVER_MAPS[m_idx][b_idx];\
+        int32_t final_tq = (voted_tq < limit) ? voted_tq : limit;\
+\
+        // 4. [FIA Art 8.4] FAIL-SAFE OVERRIDES (Guardian Layer)\
+        if (temp > ECU_Config::THERMAL_CRITICAL) \{\
+            int32_t derate = 1024 - ((temp - ECU_Config::THERMAL_CRITICAL) / 4);\
+            derate = (derate < 0) ? 0 : derate;\
+            final_tq = (static_cast<int64_t>(final_tq) * derate) >> 10;\
+            frame.guardian_engaged = true;\
+        \}\
+\
+        // 5. HARDWARE ACTUATION\
+        int32_t rail_req = (450 * ECU_Config::FP_SCALE) + (final_tq * 4);\
+        rail_req = (rail_req > ECU_Config::MAX_SAFE_RAIL) ? ECU_Config::MAX_SAFE_RAIL : rail_req;\
+\
+        frame.rail_dac = (static_cast<uint64_t>(rail_req) * ECU_Config::DAC_MAX) / ECU_Config::MAX_SAFE_RAIL;\
+\
+        return frame;\
+    \}\
+\};\
+}

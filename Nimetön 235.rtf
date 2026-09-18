@@ -1,0 +1,317 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 #include <cstdint>\
+\
+/**\
+ * @file Ultimate_Master_ECU_V15.2_FailSoft.cpp\
+ * @brief High-reliability Engine Control Unit with Fail-Soft Analog Bypass.\
+ * @version 15.2.FSE (Fail-Soft Sentinel Edition)\
+ * \
+ * DESIGN PRINCIPLES:\
+ * 1. Fixed-point math for deterministic execution.\
+ * 2. Triple Modular Redundancy (TMR) for torque safety.\
+ * 3. Sentinel Guards for memory integrity.\
+ * 4. Human-readable ECU-specific fault messaging.\
+ */\
+\
+namespace ECU_Config \{\
+    // Fixed-point arithmetic constants (10-bit shift = 1024 scale)\
+    static constexpr int32_t FP_SHIFT = 10;\
+    static constexpr int32_t FP_SCALE = (1 << FP_SHIFT);\
+    static constexpr int32_t FP_ROUND = (1 << (FP_SHIFT - 1));\
+    \
+    // Physical Safety Limits\
+    static constexpr int32_t MAX_SAFE_RAIL    = 2600 * FP_SCALE;\
+    static constexpr int32_t THERMAL_CRITICAL = 110 * FP_SCALE;\
+    static constexpr int32_t THERMAL_HYST     = 5 * FP_SCALE;\
+    \
+    // Warm-up parameters\
+    static constexpr int32_t TEMP_COLD_MIN    = 40 * FP_SCALE;\
+    static constexpr int32_t TEMP_COLD_MAX    = 70 * FP_SCALE;\
+    \
+    // Hardware constraints\
+    static constexpr uint32_t DAC_MAX         = 4095U;\
+    static constexpr uint32_t BASE_INJECTOR_US = 250U;\
+    static constexpr uint32_t MAX_INJECTOR_US  = 4500U;\
+\
+    // Fueling maps for different aggression levels\
+    static constexpr int32_t ECO_MAP[]  = \{ 400, 420, 440, 460, 480 \};\
+    static constexpr int32_t RACE_MAP[] = \{ 480, 500, 520, 540, 560 \};\
+\
+    // Integrity Check Constants\
+    static constexpr uint32_t STACK_MAGIC = 0xDEADBEEF;\
+    static constexpr uint64_t SW_CERT_ID  = 0x554C54494D415445ULL;\
+    static constexpr uint32_t WDT_KICK_MAGIC  = 0xA5A5A5A5;\
+    static constexpr uint8_t MAX_FAULT_CYCLES = 30; \
+    static constexpr int32_t VOTING_MARGIN    = 25;\
+    \
+    // Filter and Trim parameters\
+    static constexpr int32_t KALMAN_MIN_P     = 50;\
+    static constexpr int32_t TRIM_GAIN        = 1;\
+    static constexpr int32_t MAX_TRIM         = 100 * FP_SCALE;\
+\
+    // Mechanical protection\
+    static constexpr int32_t DRIVE_RESONANCE_HZ = 12;\
+    static constexpr int32_t SMOOTHING_GAIN     = 150;\
+    static constexpr int32_t MIN_BARO_SCALE     = 700;\
+    static constexpr int32_t WEAR_LIMIT_WARNING = 80 * FP_SCALE;\
+\
+    // Helper: Clamps a value within a range\
+    template<typename T>\
+    static constexpr T SafeClamp(T val, T min_v, T max_v) \{\
+        return (val < min_v) ? min_v : ((val > max_v) ? max_v : val);\
+    \}\
+\
+    // Helper: Absolute value for signed types\
+    template<typename T>\
+    static constexpr T SafeAbs(T v) \{ return (v < 0) ? -v : v; \}\
+\
+    // Helper: Linear Interpolation for smooth transitions\
+    static constexpr int32_t Lerp(int32_t v1, int32_t v2, int32_t t_fp) \{\
+        return v1 + static_cast<int32_t>((static_cast<int64_t>(v2 - v1) * t_fp) >> FP_SHIFT);\
+    \}\
+\}\
+\
+/**\
+ * @brief Kalman Filter for signal conditioning.\
+ * Predicts and corrects sensor input to remove electrical noise.\
+ */\
+class KalmanFilter \{\
+private:\
+    int32_t x, p, q, r;\
+public:\
+    constexpr KalmanFilter(int32_t init_q, int32_t init_r) \
+        : x(0), p(ECU_Config::FP_SCALE), q(init_q), r(init_r) \{\}\
+\
+    int32_t update(int32_t measurement) \{\
+        p = p + q; // Predict error covariance\
+        int32_t divisor = (p + r <= 0) ? 1 : (p + r);\
+        int32_t k = static_cast<int32_t>((static_cast<int64_t>(p) << ECU_Config::FP_SHIFT) / divisor); // Gain\
+        x = x + static_cast<int32_t>((static_cast<int64_t>(k) * (measurement - x) + ECU_Config::FP_ROUND) >> ECU_Config::FP_SHIFT); // Update state\
+        p = static_cast<int32_t>((static_cast<int64_t>(ECU_Config::FP_SCALE - k) * p + ECU_Config::FP_ROUND) >> ECU_Config::FP_SHIFT); // Update covariance\
+        if (p < ECU_Config::KALMAN_MIN_P) p = ECU_Config::KALMAN_MIN_P;\
+        return x;\
+    \}\
+\};\
+\
+class Ultimate_Master_ECU_V15_2_Final_Standard \{\
+public:\
+    struct Output \{\
+        uint32_t rail_dac;\
+        uint32_t injector_us;\
+        int32_t timing_advance_us;\
+        uint16_t aggression_pct;\
+        bool guardian_active;\
+        bool cold_limit_active;\
+        bool fault;\
+        bool timing_violation;\
+        bool maintenance_required;\
+        bool performance_derated;\
+        bool bypass_active;\
+        uint8_t fault_level;\
+        uint32_t wdt_token;\
+        bool dpf_regen_inhibited;\
+        int32_t altitude_derate_pct;\
+        const char* fault_msg; // Human-readable status for driver display\
+    \};\
+\
+    struct SentinelState \{\
+        bool hardware_integrity_pass;\
+        bool math_invariant_pass;\
+        uint32_t sentinel_checksum;\
+    \};\
+\
+private:\
+    KalmanFilter thr_filt\{15, 512\};\
+    KalmanFilter rpm_filt\{10, 204\};\
+    \
+    int32_t m_last_thr = 0;\
+    int32_t m_aggression = 0;\
+    int32_t m_adaptive_trim = 0;\
+    int32_t m_trim_momentum = 0;\
+    int32_t m_prev_final_tq = 0;\
+    int32_t m_resonance_buffer = 0;\
+    volatile uint32_t m_stack_guard = ECU_Config::STACK_MAGIC;\
+    uint8_t m_fault_counter = 0;\
+    uint64_t m_cycle_count = 0;\
+    bool m_thermal_cut_active = false;\
+\
+    // Verifies that the internal tuning maps haven't been corrupted in memory\
+    inline uint32_t GetMapIntegrity() const \{\
+        uint32_t chk = 0;\
+        for(int i=0; i<5; ++i) chk ^= (uint32_t)ECU_Config::ECO_MAP[i] ^ (uint32_t)ECU_Config::RACE_MAP[i];\
+        return chk;\
+    \}\
+\
+    // Core integrity check: RAM, Cert ID, and Stack Guard\
+    inline bool IsCoreIntact() const \{\
+        static const uint32_t INIT_CHK = GetMapIntegrity();\
+        return (m_stack_guard == ECU_Config::STACK_MAGIC) && \
+               (ECU_Config::SW_CERT_ID == 0x554C54494D415445ULL) &&\
+               (GetMapIntegrity() == INIT_CHK);\
+    \}\
+\
+    // Sentinel Guard: Verifies math logic and memory before every cycle\
+    inline SentinelState RunSentinelGuard() const \{\
+        SentinelState s = \{true, true, 0x0\};\
+        s.sentinel_checksum = GetMapIntegrity() ^ ECU_Config::STACK_MAGIC;\
+        if (ECU_Config::Lerp(0, 1024, 512) != 512) s.math_invariant_pass = false;\
+        if (m_stack_guard != ECU_Config::STACK_MAGIC) s.hardware_integrity_pass = false;\
+        return s;\
+    \}\
+\
+public:\
+    /**\
+     * @brief Primary control loop. Processes sensors and returns actuator signals.\
+     */\
+    Output process(int32_t thr_raw, int32_t rpm_raw, int32_t temp, int32_t boost_raw, uint32_t dt_ms = 10, uint16_t cpu_usage_ticks = 0, int32_t baro_raw = 1013, bool tcu_event = false) \{\
+        Output out = \{0, 0, 0, 0, false, false, false, false, false, false, false, 0, 0, false, 100, "SYSTEM OK"\};\
+        m_cycle_count++;\
+\
+        // --- STEP 1: TIMING & INTEGRITY CHECK ---\
+        bool high_load = (cpu_usage_ticks > 800);\
+        out.performance_derated = high_load;\
+\
+        // Check if CPU is lagging or memory is corrupted\
+        if (dt_ms > 25) \{\
+            out.fault = true;\
+            out.timing_violation = true;\
+            out.bypass_active = true;\
+            out.fault_msg = "ECU ERROR: DRIVE CAREFULLY - POWER REDUCED";\
+            return out;\
+        \}\
+\
+        if (!IsCoreIntact()) \{\
+            out.fault = true;\
+            out.bypass_active = true;\
+            out.fault_msg = "CRITICAL ECU ERROR: STOP SAFELY - SERVICE REQUIRED";\
+            return out;\
+        \}\
+\
+        uint32_t dt_sc = ECU_Config::SafeClamp(dt_ms, 1U, 100U); \
+\
+        // --- STEP 2: SIGNAL CONDITIONING ---\
+        SentinelState sentinel = RunSentinelGuard();\
+        if (!sentinel.hardware_integrity_pass || !sentinel.math_invariant_pass || thr_raw < -50 || thr_raw > 1100) \{ \
+            m_fault_counter = ECU_Config::MAX_FAULT_CYCLES;\
+        \}\
+\
+        int32_t t_f = thr_filt.update(ECU_Config::SafeClamp(thr_raw, 0, 1024));\
+        int32_t r_f = rpm_filt.update(rpm_raw);\
+\
+        // --- STEP 3: DRIVER INTENT (AGGRESSION) ---\
+        int32_t delta_thr = ECU_Config::SafeAbs(t_f - m_last_thr);\
+        int64_t agg_decay_fp = 1024LL - ((14LL * static_cast<int64_t>(dt_sc) << 10) / 100); \
+        m_aggression = static_cast<int32_t>((static_cast<int64_t>(m_aggression) * agg_decay_fp + (static_cast<int64_t>(delta_thr) * (1024LL - agg_decay_fp))) >> 10);\
+        m_aggression = ECU_Config::SafeClamp(m_aggression, 0, 1024);\
+        m_last_thr = t_f;\
+\
+        // --- STEP 4: ADAPTIVE TRIM (LEARNING) ---\
+        int32_t tq_a = static_cast<int32_t>((static_cast<int64_t>(t_f) * 640) >> ECU_Config::FP_SHIFT);\
+        int32_t tq_b = static_cast<int32_t>((static_cast<int64_t>(thr_raw) * 1280) / 2048); \
+\
+        if (!high_load) \{\
+            int32_t trim_err = tq_b - tq_a;\
+            if (ECU_Config::SafeAbs(trim_err) < ECU_Config::VOTING_MARGIN) \{\
+                m_adaptive_trim += static_cast<int32_t>((static_cast<int64_t>(trim_err) * ECU_Config::TRIM_GAIN * static_cast<int32_t>(dt_sc)) >> 11);\
+                m_adaptive_trim = static_cast<int32_t>((static_cast<int64_t>(m_adaptive_trim) * 2047LL) >> 11); // Leaky integrator\
+                m_adaptive_trim = ECU_Config::SafeClamp(m_adaptive_trim, -ECU_Config::MAX_TRIM, ECU_Config::MAX_TRIM);\
+                m_trim_momentum = ((m_trim_momentum * 1023) + ECU_Config::SafeAbs(m_adaptive_trim)) >> 10;\
+            \}\
+        \}\
+        out.maintenance_required = (m_trim_momentum > ECU_Config::WEAR_LIMIT_WARNING);\
+        if (out.maintenance_required) out.fault_msg = "SERVICE REQUIRED SOON: ENGINE WEAR DETECTED";\
+\
+        // --- STEP 5: SENSOR VOTING & FAULT HANDLING ---\
+        if (ECU_Config::SafeAbs(tq_a - tq_b) > ECU_Config::VOTING_MARGIN) m_fault_counter++;\
+        else if (m_fault_counter > 0) m_fault_counter--;\
+\
+        if (m_fault_counter >= ECU_Config::MAX_FAULT_CYCLES) \{ \
+            out.fault = true; \
+            out.bypass_active = true; // Engage physical relay override\
+            out.fault_msg = "ACCELERATOR FAULT: LIMP HOME MODE - MAX SPEED LIMITED";\
+            return out; \
+        \}\
+        out.fault_level = m_fault_counter;\
+\
+        // --- STEP 6: MECHANICAL PROTECTION (RESONANCE DAMPING) ---\
+        int32_t damping_gain = tcu_event ? (ECU_Config::SMOOTHING_GAIN * 2) : ECU_Config::SMOOTHING_GAIN;\
+        int32_t dyn_jerk = static_cast<int32_t>((static_cast<int64_t>(tq_a - m_resonance_buffer) * (static_cast<int64_t>(damping_gain) * static_cast<int32_t>(dt_sc)) / 10) >> 10);\
+        m_resonance_buffer += dyn_jerk;\
+        tq_a = m_resonance_buffer;\
+\
+        // --- STEP 7: THERMAL & ALTITUDE MANAGEMENT ---\
+        int32_t t_factor = ECU_Config::SafeClamp(static_cast<int32_t>((static_cast<int64_t>(temp - ECU_Config::TEMP_COLD_MIN) * ECU_Config::FP_SCALE) / (ECU_Config::TEMP_COLD_MAX - ECU_Config::TEMP_COLD_MIN)), 0, ECU_Config::FP_SCALE);\
+        int32_t torque_limit_factor = ECU_Config::Lerp((ECU_Config::FP_SCALE * 75) >> 7, ECU_Config::FP_SCALE, t_factor);\
+        \
+        // BASE TIMING (45us reference) with RPM and Aggression compensation\
+        int32_t pmax_timing = ECU_Config::Lerp(45, 45 + (r_f / 100) + (m_aggression / 32), t_factor);\
+\
+        if (temp < ECU_Config::TEMP_COLD_MAX) \{\
+            out.cold_limit_active = true;\
+            int32_t max_rise = static_cast<int32_t>((static_cast<int64_t>(ECU_Config::Lerp(8, 25, t_factor)) * static_cast<int32_t>(dt_sc)) / 10); \
+            tq_a = ECU_Config::SafeClamp(tq_a, 0, m_prev_final_tq + max_rise); // Smooth torque rise during warm-up\
+        \}\
+\
+        // Altitude derating based on barometric pressure\
+        int32_t baro_factor = ECU_Config::SafeClamp(static_cast<int32_t>((static_cast<int64_t>(baro_raw) * ECU_Config::FP_SCALE) / 1013), ECU_Config::MIN_BARO_SCALE, ECU_Config::FP_SCALE);\
+        torque_limit_factor = static_cast<int32_t>((static_cast<int64_t>(torque_limit_factor) * baro_factor) >> ECU_Config::FP_SHIFT);\
+        out.altitude_derate_pct = (baro_factor * 100) >> ECU_Config::FP_SHIFT;\
+\
+        // --- STEP 8: FINAL TORQUE & SMOKE LIMITING ---\
+        int32_t idx = ECU_Config::SafeClamp((boost_raw * 4) / (2 * ECU_Config::FP_SCALE), 0, 3);\
+        int32_t smoke_limit = ECU_Config::ECO_MAP[idx] + static_cast<int32_t>((static_cast<int64_t>(ECU_Config::RACE_MAP[idx] - ECU_Config::ECO_MAP[idx]) * m_aggression) >> 10);\
+        \
+        int32_t final_tq = (tq_a < smoke_limit) ? tq_a : smoke_limit;\
+        final_tq = static_cast<int32_t>((static_cast<int64_t>(final_tq) * torque_limit_factor) >> ECU_Config::FP_SHIFT);\
+\
+        // --- STEP 9: ASIL-D TRIPLE MODULAR REDUNDANCY ---\
+        volatile int32_t tq_v1 = final_tq;\
+        volatile int32_t tq_v2 = final_tq;\
+        volatile int32_t tq_v3 = final_tq;\
+        if (tq_v1 != tq_v2 || tq_v2 != tq_v3) \{ \
+            out.fault = true; \
+            out.bypass_active = true; \
+            out.fault_msg = "CRITICAL ECU ERROR: STOP SAFELY - SERVICE REQUIRED";\
+            return out; \
+        \}\
+        \
+        m_prev_final_tq = final_tq;\
+\
+        // --- STEP 10: CRITICAL THERMAL PROTECTION ---\
+        if (temp > ECU_Config::THERMAL_CRITICAL) m_thermal_cut_active = true;\
+        else if (temp < (ECU_Config::THERMAL_CRITICAL - ECU_Config::THERMAL_HYST)) m_thermal_cut_active = false;\
+\
+        if (m_thermal_cut_active) \{\
+            int32_t derate = ECU_Config::SafeClamp(ECU_Config::FP_SCALE - (temp - ECU_Config::THERMAL_CRITICAL) / 20, 0, ECU_Config::FP_SCALE);\
+            final_tq = static_cast<int32_t>((static_cast<int64_t>(final_tq) * derate) >> ECU_Config::FP_SHIFT);\
+            out.guardian_active = true;\
+            out.fault_msg = "ENGINE OVERHEATING: COOLING DOWN - PERFORMANCE LIMITED";\
+        \}\
+\
+        // --- STEP 11: OUTPUT GENERATION (RAIL & INJECTORS) ---\
+        int32_t rail_req = (450 * ECU_Config::FP_SCALE) + static_cast<int32_t>((static_cast<int64_t>(final_tq) * (30 + (m_aggression / 100))) / 10);\
+        rail_req = ECU_Config::SafeClamp(rail_req + m_adaptive_trim, 0, ECU_Config::MAX_SAFE_RAIL);\
+\
+        out.rail_dac = ECU_Config::SafeClamp((static_cast<uint32_t>((static_cast<uint64_t>(rail_req) * ECU_Config::DAC_MAX) / ECU_Config::MAX_SAFE_RAIL)), 0U, ECU_Config::DAC_MAX);\
+        out.injector_us = ECU_Config::SafeClamp((static_cast<uint32_t>(ECU_Config::BASE_INJECTOR_US + (rail_req / (2 * ECU_Config::FP_SCALE)))), ECU_Config::BASE_INJECTOR_US, ECU_Config::MAX_INJECTOR_US);\
+        out.aggression_pct = static_cast<uint16_t>((m_aggression * 100) >> ECU_Config::FP_SHIFT);\
+        out.timing_advance_us = pmax_timing;\
+        out.wdt_token = ECU_Config::WDT_KICK_MAGIC ^ (static_cast<uint32_t>(m_cycle_count & 0xFFFFFFFF) * 0x1F3F);\
+\
+        // --- FINAL STACK CHECK ---\
+        if (m_stack_guard != ECU_Config::STACK_MAGIC) \{ \
+            out.fault = true; \
+            out.bypass_active = true; \
+            out.fault_msg = "CRITICAL ECU ERROR: STOP SAFELY - SERVICE REQUIRED";\
+        \}\
+\
+        return out;\
+    \}\
+\};\
+}

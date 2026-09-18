@@ -1,0 +1,150 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 #include <cstdint>\
+#include <atomic>\
+#include <type_traits>\
+\
+namespace ECU_Config \{\
+    static constexpr int32_t FP_SHIFT = 10;\
+    static constexpr int32_t FP_SCALE = (1 << FP_SHIFT);\
+    static constexpr int32_t FP_ROUND = (1 << (FP_SHIFT - 1));\
+    \
+    static constexpr int32_t MAX_SAFE_RAIL      = 2800 * FP_SCALE;\
+    static constexpr int32_t EXHAUST_LIMIT      = 820 * FP_SCALE;\
+    static constexpr int32_t THERMAL_HYSTERESIS = 50 * FP_SCALE;\
+    static constexpr int32_t TURBO_RPM_MAX_BASE = 195000;\
+    \
+    static constexpr uint32_t PILOT_INJ_US      = 120U;\
+    static constexpr uint32_t POST_INJ_US       = 80U;\
+    static constexpr uint32_t DAC_MAX           = 4095U;\
+    static constexpr uint32_t STACK_MAGIC       = 0xDEADBEEF;\
+    static constexpr uint64_t SW_CERT_ID        = 0x554C54494D415445ULL;\
+    static constexpr uint32_t WDT_KICK_MAGIC    = 0xA5A5A5A5;\
+    \
+    static constexpr uint8_t  BLACKBOX_SIZE     = 100;\
+    static constexpr uint8_t  CYLINDER_COUNT    = 4;\
+    static constexpr int32_t  TQ_TO_RAIL_COEFF  = 640;\
+\
+    template<typename T> static constexpr T SafeClamp(T val, T min_v, T max_v) noexcept \{\
+        return (val < min_v) ? min_v : ((val > max_v) ? max_v : val);\
+    \}\
+\}\
+\
+class ECU_Core_Engine \{\
+public:\
+    struct Output \{\
+        uint32_t rail_dac, main_inj_us[ECU_Config::CYLINDER_COUNT];\
+        uint32_t pilot_inj_us, post_inj_us;\
+        bool bypass_active, guardian_active, anti_jerk_active, knock_detected;\
+        uint16_t dtc_code; const char *diag_msg;\
+        uint32_t wdt_token;\
+    \};\
+\
+private:\
+    uint64_t m_cycle_count = 0;\
+    int32_t m_exhaust_model = 20 * ECU_Config::FP_SCALE;\
+    int32_t m_smooth_thr = 0, m_prev_target_tq = 0, m_prev_rpm = 0;\
+    int32_t m_zqc_offset[ECU_Config::CYLINDER_COUNT] = \{0, 2, -1, 1\};\
+    int32_t m_anti_jerk_buffer = 0;\
+    bool m_thermal_lock = false;\
+    \
+    struct LogEntry \{ uint32_t cycle; int32_t rpm; uint16_t dtc; \} m_blackbox[ECU_Config::BLACKBOX_SIZE];\
+    uint8_t m_bb_idx = 0;\
+    bool m_bb_locked = false;\
+\
+    inline int32_t ApplyAntiJerk(int32_t current_tq, int32_t rpm_delta) noexcept \{\
+        int32_t correction = (rpm_delta * 12) >> 4; \
+        m_anti_jerk_buffer = (m_anti_jerk_buffer * 7 + correction) >> 3;\
+        return current_tq - m_anti_jerk_buffer;\
+    \}\
+\
+    inline int32_t ApplyDashpot(int32_t target, int32_t prev) noexcept \{\
+        if (target < prev - 50) return prev - 15;\
+        return target;\
+    \}\
+\
+    inline uint32_t GetInjectorLatency(uint32_t rail_dac, uint32_t bat_mv) noexcept \{\
+        uint32_t v_latency = (bat_mv < 12000) ? 150 : 80;\
+        uint32_t p_latency = (rail_dac * 50) / 4096; \
+        return v_latency + p_latency;\
+    \}\
+\
+    inline int32_t GetFuelDensityCorr(int32_t fuel_temp) noexcept \{\
+        if (fuel_temp < 20 * ECU_Config::FP_SCALE) return -20;\
+        if (fuel_temp > 60 * ECU_Config::FP_SCALE) return 35;\
+        return 0;\
+    \}\
+\
+public:\
+    Output step(int32_t a1, int32_t a2, int32_t rpm, int32_t eng_temp, int32_t fuel_temp, uint32_t bat_mv, int32_t ambient_hpa, bool knock_sensor, bool aux_load) noexcept \{\
+        Output out = \{0, \{0\}, 0, 0, false, false, false, false, 0, "SYSTEM NOMINAL", 0\};\
+        m_cycle_count++;\
+\
+        if (*(volatile uint32_t*)&ECU_Config::STACK_MAGIC != 0xDEADBEEF) \{\
+            out.bypass_active = true; out.rail_dac = 750;\
+            for(int i=0; i<ECU_Config::CYLINDER_COUNT; ++i) out.main_inj_us[i] = 400;\
+            out.dtc_code = 0x0606; out.diag_msg = "CRITICAL DATA CORRUPTION - EMERGENCY BYPASS ACTIVE";\
+            return out;\
+        \}\
+\
+        int32_t alt_factor = ECU_Config::SafeClamp(ambient_hpa, 600, 1013);\
+        int32_t dynamic_turbo_max = (ECU_Config::TURBO_RPM_MAX_BASE * alt_factor) / 1013;\
+\
+        int32_t raw_thr = (a1 + a2) >> 1;\
+        if (aux_load && rpm < 1000) raw_thr += 50; \
+        \
+        m_smooth_thr += (ECU_Config::SafeClamp(raw_thr, 0, 1024) - m_smooth_thr) >> 3;\
+        \
+        int32_t rpm_delta = rpm - m_prev_rpm;\
+        int32_t target_tq = (static_cast<int64_t>(m_smooth_thr) * ECU_Config::TQ_TO_RAIL_COEFF) >> 10;\
+        \
+        target_tq = ApplyDashpot(target_tq, m_prev_target_tq);\
+        target_tq = ApplyAntiJerk(target_tq, rpm_delta);\
+        \
+        m_exhaust_model += (target_tq / 40) - (m_exhaust_model / 180);\
+        if (m_exhaust_model > ECU_Config::EXHAUST_LIMIT) m_thermal_lock = true;\
+        if (m_thermal_lock && m_exhaust_model < (ECU_Config::EXHAUST_LIMIT - ECU_Config::THERMAL_HYSTERESIS)) m_thermal_lock = false;\
+\
+        if (eng_temp < 60 * ECU_Config::FP_SCALE) target_tq = (target_tq * 700) >> 10;\
+\
+        int32_t rail_press = (target_tq * 3) + 450 * ECU_Config::FP_SCALE;\
+        out.rail_dac = ECU_Config::SafeClamp<uint32_t>((static_cast<uint64_t>(rail_press) * ECU_Config::DAC_MAX) / ECU_Config::MAX_SAFE_RAIL, 0, 4095);\
+\
+        uint32_t latency = GetInjectorLatency(out.rail_dac, bat_mv);\
+        int32_t density_corr = GetFuelDensityCorr(fuel_temp);\
+        out.knock_detected = knock_sensor;\
+        int32_t knock_retard = out.knock_detected ? 180 : 0;\
+\
+        out.pilot_inj_us = (rpm < 3500) ? ECU_Config::PILOT_INJ_US : 0;\
+        for(int i=0; i < ECU_Config::CYLINDER_COUNT; ++i) \{\
+            out.main_inj_us[i] = ECU_Config::SafeClamp<int32_t>(target_tq + latency + m_zqc_offset[i] + density_corr - knock_retard, 0, 4500);\
+        \}\
+\
+        out.post_inj_us = (m_exhaust_model > 700 * ECU_Config::FP_SCALE && eng_temp > 75 * ECU_Config::FP_SCALE && rpm > 1800) ? ECU_Config::POST_INJ_US : 0;\
+\
+        if (m_thermal_lock || (target_tq * 180) > dynamic_turbo_max || out.knock_detected) \{\
+            out.guardian_active = true;\
+            for(int i=0; i<ECU_Config::CYLINDER_COUNT; ++i) out.main_inj_us[i] >>= 1;\
+            out.dtc_code = out.knock_detected ? 0x0325 : 0x0217;\
+            out.diag_msg = out.knock_detected ? "ENGINE KNOCK DETECTED - POWER LIMIT IMPOSED" : "THERMAL OVERLOAD - POWER REDUCED FOR COMPONENT COOLING";\
+            m_bb_locked = true;\
+        \}\
+\
+        if (!m_bb_locked) \{\
+            m_blackbox[m_bb_idx % ECU_Config::BLACKBOX_SIZE] = \{ static_cast<uint32_t>(m_cycle_count), rpm, out.dtc_code \};\
+            m_bb_idx++;\
+        \}\
+\
+        m_prev_rpm = rpm; m_prev_target_tq = target_tq;\
+        out.wdt_token = ECU_Config::WDT_KICK_MAGIC ^ static_cast<uint32_t>(m_cycle_count);\
+        return out;\
+    \}\
+\};\
+\
+static_assert(sizeof(ECU_Core_Engine) <= 2048, "SRAM Boundary Exceeded");\
+}

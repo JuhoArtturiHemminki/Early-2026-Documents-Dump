@@ -1,0 +1,146 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 #include <cstdint>\
+\
+namespace ECU_Config \{\
+    static constexpr int32_t FP_SHIFT = 10;\
+    static constexpr int32_t FP_SCALE = (1 << FP_SHIFT);\
+    static constexpr int32_t FP_ROUND = (1 << (FP_SHIFT - 1));\
+    \
+    static constexpr int32_t MAX_SAFE_RAIL    = 2600 * FP_SCALE;\
+    static constexpr int32_t THERMAL_CRITICAL = 110 * FP_SCALE;\
+    static constexpr int32_t TEMP_COLD_THRESHOLD = 60 * FP_SCALE;\
+    static constexpr uint32_t DAC_MAX         = 4095U;\
+    static constexpr uint32_t BASE_INJECTOR_US = 250U;\
+\
+    static constexpr int32_t ECO_MAP[5]  = \{ 400, 420, 440, 460, 480 \};\
+    static constexpr int32_t RACE_MAP[5] = \{ 480, 500, 520, 540, 560 \};\
+\
+    static constexpr uint32_t STACK_MAGIC = 0xDEADBEEF;\
+    static constexpr uint64_t SW_CERT_ID  = 0x554C54494D415445ULL;\
+    static constexpr uint32_t MASTER_HASH = 0xAF42B109U;\
+\
+    static constexpr uint8_t MAX_FAULT_CYCLES = 30; \
+    static constexpr int32_t VOTING_MARGIN    = 20;\
+\
+    template<typename T>\
+    static constexpr T SafeClamp(T val, T min_v, T max_v) \{\
+        return (val < min_v) ? min_v : ((val > max_v) ? max_v : val);\
+    \}\
+\}\
+\
+class KalmanFilter \{\
+private:\
+    int32_t x, p, q, r;\
+public:\
+    constexpr KalmanFilter(int32_t init_q, int32_t init_r) \
+        : x(0), p(ECU_Config::FP_SCALE), q(init_q), r(init_r) \{\}\
+\
+    int32_t update(int32_t measurement) \{\
+        p = p + q;\
+        int32_t k = (static_cast<int64_t>(p) << ECU_Config::FP_SHIFT) / (p + r);\
+        x = x + ((static_cast<int64_t>(k) * (measurement - x) + ECU_Config::FP_ROUND) >> ECU_Config::FP_SHIFT);\
+        p = ((static_cast<int64_t>(ECU_Config::FP_SCALE - k) * p + ECU_Config::FP_ROUND) >> ECU_Config::FP_SHIFT);\
+        return x;\
+    \}\
+\};\
+\
+class Ultimate_Master_ECU \{\
+public:\
+    struct Output \{\
+        uint32_t rail_dac;\
+        uint32_t injector_us;\
+        int32_t timing_advance_us;\
+        uint16_t aggression_pct;\
+        bool guardian_active;\
+        bool cold_limit_active;\
+        bool fault;\
+        uint8_t fault_level;\
+    \};\
+\
+private:\
+    KalmanFilter thr_filt\{15, 512\};\
+    KalmanFilter rpm_filt\{10, 204\};\
+    \
+    int32_t m_last_thr = 0;\
+    int32_t m_aggression = 0;\
+    int32_t m_adaptive_trim = 0;\
+    int32_t m_prev_final_tq = 0;\
+    uint32_t m_stack_guard = ECU_Config::STACK_MAGIC;\
+    uint8_t m_fault_counter = 0;\
+\
+    bool IsCoreIntact() const \{\
+        return (m_stack_guard == ECU_Config::STACK_MAGIC) && \
+               (ECU_Config::SW_CERT_ID == 0x554C54494D415445ULL);\
+    \}\
+\
+    int32_t get_blended_limit(int32_t boost, int32_t aggression) \{\
+        int32_t idx = ECU_Config::SafeClamp((boost * 4) / (2 * ECU_Config::FP_SCALE), 0, 3);\
+        return ECU_Config::ECO_MAP[idx] + ((ECU_Config::RACE_MAP[idx] - ECU_Config::ECO_MAP[idx]) * aggression >> 10);\
+    \}\
+\
+public:\
+    Output process(int32_t thr_raw, int32_t rpm_raw, int32_t temp, int32_t boost_raw) \{\
+        Output out = \{0, 0, 0, 0, false, false, false, 0\};\
+\
+        if (!IsCoreIntact() || thr_raw < 0 || thr_raw > 1024) \{\
+            m_fault_counter = ECU_Config::MAX_FAULT_CYCLES;\
+        \}\
+\
+        int32_t t_f = thr_filt.update(thr_raw);\
+        int32_t r_f = rpm_filt.update(rpm_raw);\
+\
+        int32_t delta_thr = (t_f > m_last_thr) ? (t_f - m_last_thr) : (m_last_thr - t_f);\
+        m_aggression = ((m_aggression * 990) + (delta_thr * 100)) >> 10;\
+        m_aggression = ECU_Config::SafeClamp(m_aggression, 0, 1024);\
+        m_last_thr = t_f;\
+\
+        int32_t tq_a = (t_f * 640) >> ECU_Config::FP_SHIFT;\
+        int32_t tq_b = (t_f * 1280) / 2048;\
+        if (std::abs(tq_a - tq_b) > ECU_Config::VOTING_MARGIN) m_fault_counter++;\
+        else if (m_fault_counter > 0) m_fault_counter--;\
+\
+        if (m_fault_counter >= ECU_Config::MAX_FAULT_CYCLES) \{ out.fault = true; return out; \}\
+        out.fault_level = m_fault_counter;\
+\
+        int32_t torque_limit_factor = ECU_Config::FP_SCALE;\
+        int32_t timing_base = 0;\
+\
+        if (temp < ECU_Config::TEMP_COLD_THRESHOLD) \{\
+            out.cold_limit_active = true;\
+            torque_limit_factor = (ECU_Config::FP_SCALE * 75) >> 7;\
+            int32_t max_rise = 10; \
+            tq_a = ECU_Config::SafeClamp(tq_a, 0, m_prev_final_tq + max_rise);\
+        \} else \{\
+            if (r_f < 1500) torque_limit_factor = (ECU_Config::FP_SCALE * 90) >> 7;\
+            if (t_f > 400) timing_base = 45;\
+        \}\
+\
+        int32_t smoke_limit = get_blended_limit(boost_raw, m_aggression);\
+        int32_t final_tq = (tq_a < smoke_limit) ? tq_a : smoke_limit;\
+        final_tq = (static_cast<int64_t>(final_tq) * torque_limit_factor) >> ECU_Config::FP_SHIFT;\
+        m_prev_final_tq = final_tq;\
+\
+        if (temp > ECU_Config::THERMAL_CRITICAL) \{\
+            int32_t derate = ECU_Config::SafeClamp(ECU_Config::FP_SCALE - (temp - ECU_Config::THERMAL_CRITICAL) / 20, 0, ECU_Config::FP_SCALE);\
+            final_tq = (static_cast<int64_t>(final_tq) * derate) >> ECU_Config::FP_SHIFT;\
+            out.guardian_active = (derate < ECU_Config::FP_SCALE);\
+        \}\
+\
+        int32_t rail_req = (450 * ECU_Config::FP_SCALE) + (final_tq * (30 + (m_aggression / 100)) / 10);\
+        rail_req = ECU_Config::SafeClamp(rail_req + m_adaptive_trim, 0, ECU_Config::MAX_SAFE_RAIL);\
+\
+        out.rail_dac = (static_cast<uint64_t>(rail_req) * ECU_Config::DAC_MAX) / ECU_Config::MAX_SAFE_RAIL;\
+        out.injector_us = ECU_Config::BASE_INJECTOR_US + (rail_req / 2);\
+        out.aggression_pct = (m_aggression * 100) >> 10;\
+        out.timing_advance_us = timing_base;\
+\
+        return out;\
+    \}\
+\};\
+}

@@ -1,0 +1,91 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\froman\fcharset0 Times-Roman;\f1\froman\fcharset0 Times-Bold;\f2\fmodern\fcharset0 Courier;
+}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;}
+{\*\listtable{\list\listtemplateid1\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid1\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid1}
+{\list\listtemplateid2\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid101\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid2}
+{\list\listtemplateid3\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid201\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid3}
+{\list\listtemplateid4\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid301\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid4}}
+{\*\listoverridetable{\listoverride\listid1\listoverridecount0\ls1}{\listoverride\listid2\listoverridecount0\ls2}{\listoverride\listid3\listoverridecount0\ls3}{\listoverride\listid4\listoverridecount0\ls4}}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab720
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 \expnd0\expndtw0\kerning0
+1. "Pumppaava" tehonrajoitus (Thermal Hysteresis)\
+Koodissa ei ole 
+\f1\b hystereesi\'e4
+\f0\b0  l\'e4mp\'f6tilarajoitukselle.\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls1\ilvl0
+\f1\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Ilmi\'f6:
+\f0\b0  Kun l\'e4mp\'f6tila ylitt\'e4\'e4 110 \'b0C, 
+\f2\fs26 derate
+\f0\fs24  laskee v\'e4\'e4nt\'f6momenttia. T\'e4m\'e4 j\'e4\'e4hdytt\'e4\'e4 moottoria hetkellisesti, jolloin l\'e4mp\'f6tila laskee 109 \'b0C:een, ja t\'e4ysi teho palaa v\'e4litt\'f6m\'e4sti. Miljardin kilometrin matkalla t\'e4m\'e4 aiheuttaa rasittavaa nypytyst\'e4 ja mekaanista v\'e4rin\'e4\'e4 kriittisell\'e4 l\'e4mp\'f6tilarajalla.\
+\ls1\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Suositus:
+\f0\b0  Lis\'e4\'e4 kynnysarvo, joka pit\'e4\'e4 rajoituksen p\'e4\'e4ll\'e4, kunnes l\'e4mp\'f6tila laskee esimerkiksi 105 \'b0C:een.\
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+2. Kalman-suodattimen "Tuuli" (Wind-up)\
+Pitk\'e4kestoisessa ajossa, jos sensori antaa pitk\'e4\'e4n tasaisen virheellist\'e4 (offset) signaalia, Kalman-suodattimen sis\'e4inen kovarianssi 
+\f2\fs26 p
+\f0\fs24  saattaa laskea liian alas.\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls2\ilvl0
+\f1\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Ilmi\'f6:
+\f0\b0  Jos anturi "her\'e4\'e4" \'e4killisesti pitk\'e4n tasaisen jakson j\'e4lkeen, suodatin reagoi aluksi liian hitaasti, koska se on luottanut aiempaan vakaaseen tilaan liikaa. T\'e4m\'e4 voi aiheuttaa viivett\'e4 kiihdytyksess\'e4 juuri kriittisell\'e4 hetkell\'e4.\
+\ls2\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Suositus:
+\f0\b0  Lis\'e4\'e4 alaraja (
+\f2\fs26 MIN_P
+\f0\fs24 ) suodattimen ep\'e4varmuudelle.\
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+3. Adaptiivinen Trim-muuttuja on "kuollut"\
+Koodissa on muuttuja 
+\f2\fs26 m_adaptive_trim
+\f0\fs24 , mutta sit\'e4 ei p\'e4ivitet\'e4 miss\'e4\'e4n kohdassa.\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls3\ilvl0
+\f1\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Ilmi\'f6:
+\f0\b0  Miljardin kilometrin aikana moottorin osat kuluvat (suuttimet tukkeutuvat, pumpun teho laskee). Koska 
+\f2\fs26 m_adaptive_trim
+\f0\fs24  pysyy aina nollassa, j\'e4rjestelm\'e4 ei kompensoi kulumista automaattisesti.\
+\ls3\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Suositus:
+\f0\b0  Toteuta hidas integraattori, joka vertaa 
+\f2\fs26 tq_a
+\f0\fs24  ja 
+\f2\fs26 tq_b
+\f0\fs24  v\'e4list\'e4 pitk\'e4n aikav\'e4lin eroa ja s\'e4\'e4t\'e4\'e4 trimmi\'e4 sen mukaan.\
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+4. Kellon ylivuoto (WDT Token)\
+\pard\pardeftab720\partightenfactor0
+
+\f2\fs26 \cf0 m_cycle_count
+\f0\fs24  on 
+\f2\fs26 uint32_t
+\f0\fs24 .\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls4\ilvl0
+\f1\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Ilmi\'f6:
+\f0\b0  Noin 50 Hz taajuudella (20 ms sykli) laskuri py\'f6r\'e4ht\'e4\'e4 ymp\'e4ri (overflow) noin 2,7 vuoden jatkuvan ajon j\'e4lkeen. Vaikka koodi ei kaadu, 
+\f2\fs26 wdt_token
+\f0\fs24  hypp\'e4\'e4 nollaan tai muuttuu ep\'e4jatkuvasti, mik\'e4 saattaa laukaista ulkoisen turvaj\'e4rjestelm\'e4n turhaan.\
+\ls4\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Suositus:
+\f0\b0  K\'e4yt\'e4 
+\f2\fs26 uint64_t
+\f0\fs24  laskuria tai m\'e4\'e4rittele hallittu nollausk\'e4ytt\'e4ytyminen.\
+}

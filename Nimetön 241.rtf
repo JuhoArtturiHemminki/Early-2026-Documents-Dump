@@ -1,0 +1,300 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 #include <cstdint>\
+#include <atomic>\
+\
+namespace ECU_Config \{\
+    static constexpr int32_t FP_SHIFT = 10;\
+    static constexpr int32_t FP_SCALE = (1 << FP_SHIFT);\
+    static constexpr int32_t FP_ROUND = (1 << (FP_SHIFT - 1));\
+    \
+    static constexpr int32_t MAX_SAFE_RAIL    = 2600 * FP_SCALE;\
+    static constexpr int32_t THERMAL_CRITICAL = 110 * FP_SCALE;\
+    static constexpr int32_t THERMAL_HYST     = 5 * FP_SCALE;\
+    \
+    static constexpr int32_t TEMP_COLD_MIN    = 40 * FP_SCALE;\
+    static constexpr int32_t TEMP_COLD_MAX    = 70 * FP_SCALE;\
+    \
+    static constexpr uint32_t DAC_MAX         = 4095U;\
+    static constexpr uint32_t BASE_INJECTOR_US = 250U;\
+    static constexpr uint32_t MAX_INJECTOR_US  = 4500U;\
+\
+    static constexpr int32_t ECO_MAP[]  = \{ 400, 420, 440, 460, 480 \};\
+    static constexpr int32_t RACE_MAP[] = \{ 480, 500, 520, 540, 560 \};\
+\
+    static constexpr uint32_t STACK_MAGIC = 0xDEADBEEF;\
+    static constexpr uint64_t SW_CERT_ID  = 0x554C54494D415445ULL;\
+    static constexpr uint32_t WDT_KICK_MAGIC  = 0xA5A5A5A5;\
+    static constexpr uint8_t MAX_FAULT_CYCLES = 30; \
+    static constexpr int32_t VOTING_MARGIN    = 25;\
+    \
+    static constexpr int32_t APPS_BASE_DIFF   = 40;\
+    static constexpr int32_t APPS_MAX_AGING   = 80;\
+\
+    static constexpr int32_t KALMAN_MIN_P     = 50;\
+    static constexpr int32_t TRIM_GAIN        = 1;\
+    static constexpr int32_t MAX_TRIM         = 100 * FP_SCALE;\
+    static constexpr int32_t WEAR_LIMIT_WARNING = 80 * FP_SCALE;\
+    static constexpr int32_t WEAR_LIMIT_CRITICAL = 95 * FP_SCALE;\
+\
+    static constexpr int32_t DRIVE_RESONANCE_HZ = 12;\
+    static constexpr int32_t SMOOTHING_GAIN     = 150;\
+    static constexpr int32_t MIN_BARO_SCALE     = 700;\
+\
+    template<typename T> static constexpr T SafeClamp(T val, T min_v, T max_v) \{\
+        return (val < min_v) ? min_v : ((val > max_v) ? max_v : val);\
+    \}\
+    template<typename T> static constexpr T SafeAbs(T v) \{ return (v < 0) ? -v : v; \}\
+    static constexpr int32_t Lerp(int32_t v1, int32_t v2, int32_t t_fp) \{\
+        return v1 + static_cast<int32_t>((static_cast<int64_t>(v2 - v1) * t_fp) >> FP_SHIFT);\
+    \}\
+\
+    static uint32_t CalculateCRC32_Partial(uint32_t seed, int start_idx, int end_idx) \{\
+        uint32_t crc = seed;\
+        auto crc_step = [](uint32_t c, uint32_t data) \{\
+            c ^= data;\
+            for (int j = 0; j < 32; j++) \{\
+                c = (c & 0x80000000) ? ((c << 1) ^ 0x04C11DB7) : (c << 1);\
+            \}\
+            return c;\
+        \};\
+        for(int i = start_idx; i <= end_idx; ++i) \{\
+            crc = crc_step(crc, (uint32_t)ECO_MAP[i]);\
+            crc = crc_step(crc, (uint32_t)RACE_MAP[i]);\
+        \}\
+        return crc;\
+    \}\
+\}\
+\
+class KalmanFilter \{\
+private:\
+    int32_t x, p, q, r;\
+public:\
+    constexpr KalmanFilter(int32_t init_q, int32_t init_r) : x(0), p(ECU_Config::FP_SCALE), q(init_q), r(init_r) \{\}\
+    int32_t update(int32_t measurement) \{\
+        p = p + q;\
+        int32_t div = (p + r <= 0) ? 1 : (p + r);\
+        int32_t k = static_cast<int32_t>((static_cast<int64_t>(p) << ECU_Config::FP_SHIFT) / div);\
+        x = x + static_cast<int32_t>((static_cast<int64_t>(k) * (measurement - x) + ECU_Config::FP_ROUND) >> ECU_Config::FP_SHIFT);\
+        p = static_cast<int32_t>((static_cast<int64_t>(ECU_Config::FP_SCALE - k) * p + ECU_Config::FP_ROUND) >> ECU_Config::FP_SHIFT);\
+        if (p < ECU_Config::KALMAN_MIN_P) p = ECU_Config::KALMAN_MIN_P;\
+        return x;\
+    \}\
+\};\
+\
+class Ultimate_Master_ECU_V15_2_Final_Standard \{\
+public:\
+    struct BlackBoxRecord \{\
+        uint64_t timestamp;\
+        int32_t apps1, apps2, rpm, temp, boost;\
+        int32_t final_tq, rail_p, trim;\
+        uint16_t cpu_load;\
+        const char* reason;\
+    \};\
+\
+    struct Output \{\
+        uint32_t rail_dac, injector_us;\
+        int32_t timing_advance_us;\
+        uint16_t aggression_pct;\
+        bool guardian_active, cold_limit_active, fault, timing_violation, maintenance_required;\
+        bool performance_derated, bypass_active, dpf_regen_inhibited;\
+        uint8_t fault_level;\
+        uint32_t wdt_token;\
+        int32_t altitude_derate_pct;\
+        int32_t service_est_km;\
+        const char* fault_msg;\
+        const char* diag_cause;\
+        const char* diag_code;\
+    \};\
+\
+private:\
+    KalmanFilter thr_filt\{15, 512\}, rpm_filt\{10, 204\};\
+    std::atomic<int32_t> m_adaptive_trim\{0\};\
+    int32_t m_last_thr = 0, m_aggression = 0, m_trim_momentum = 0, m_prev_final_tq = 0, m_resonance_buffer = 0;\
+    int32_t m_apps_drift_limit = ECU_Config::APPS_BASE_DIFF;\
+    volatile uint32_t m_stack_guard = ECU_Config::STACK_MAGIC;\
+    uint8_t m_fault_counter = 0;\
+    uint64_t m_cycle_count = 0;\
+    bool m_thermal_cut_active = false;\
+    bool m_blackbox_locked = false;\
+    \
+    uint32_t m_rolling_crc = 0xFFFFFFFF;\
+    int m_crc_state = 0;\
+    const uint32_t m_target_crc = ECU_Config::CalculateCRC32_Partial(0xFFFFFFFF, 0, 4);\
+\
+    void RecordToBlackBox(const char* r, int32_t a1, int32_t a2, int32_t rpm, int32_t t, int32_t b, int32_t tq, int32_t rail, uint16_t load) \{\
+        if (!m_blackbox_locked) m_blackbox_locked = true; \
+    \}\
+\
+    inline bool IsCoreIntact(uint16_t load) \{\
+        if (m_stack_guard != ECU_Config::STACK_MAGIC || ECU_Config::SW_CERT_ID != 0x554C54494D415445ULL) return false;\
+        if (load < 850) \{\
+            m_rolling_crc = ECU_Config::CalculateCRC32_Partial(0xFFFFFFFF, 0, 4);\
+            m_crc_state = 0;\
+        \} else if (load < 950) \{\
+            m_rolling_crc = ECU_Config::CalculateCRC32_Partial(m_rolling_crc, m_crc_state, m_crc_state);\
+            m_crc_state = (m_crc_state + 1) % 5;\
+            if (m_crc_state == 0) \{\
+                bool ok = (m_rolling_crc == m_target_crc);\
+                m_rolling_crc = 0xFFFFFFFF;\
+                return ok;\
+            \}\
+            return true;\
+        \}\
+        return (m_rolling_crc == m_target_crc);\
+    \}\
+\
+public:\
+    Output process(int32_t apps1_raw, int32_t apps2_raw, int32_t rpm_raw, int32_t temp, int32_t boost_raw, uint32_t dt_ms = 10, uint16_t cpu_usage_ticks = 0, int32_t baro_raw = 1013, bool tcu_event = false) \{\
+        Output out = \{0, 0, 0, 0, false, false, false, false, false, false, false, false, 0, 0, 100, 30000, "SYSTEM OK", "NO FAULTS", "OK"\};\
+        m_cycle_count++;\
+\
+        bool load_high = (cpu_usage_ticks > 850);\
+        bool load_critical = (cpu_usage_ticks > 950);\
+        out.performance_derated = load_high;\
+\
+        if (dt_ms > 25 || !IsCoreIntact(cpu_usage_ticks)) \{\
+            out.fault = true; out.bypass_active = true;\
+            out.fault_msg = "CRITICAL ECU ERROR: STOP SAFELY";\
+            out.diag_cause = "INTERNAL INTEGRITY FAILURE";\
+            out.diag_code = "ECU-INT-01";\
+            RecordToBlackBox("INTEGRITY_FAULT", apps1_raw, apps2_raw, rpm_raw, temp, boost_raw, m_prev_final_tq, 0, cpu_usage_ticks);\
+            return out;\
+        \}\
+\
+        if (ECU_Config::SafeAbs(apps1_raw - apps2_raw) > m_apps_drift_limit) \{\
+            out.fault = true; out.bypass_active = true;\
+            out.fault_msg = "ACCELERATOR FAULT: DRIVE CAREFULLY";\
+            out.diag_cause = "PEDAL SENSOR MISMATCH";\
+            out.diag_code = "APPS-MUX-01";\
+            RecordToBlackBox("APPS_MISMATCH", apps1_raw, apps2_raw, rpm_raw, temp, boost_raw, m_prev_final_tq, 0, cpu_usage_ticks);\
+            return out;\
+        \}\
+\
+        int32_t thr_raw = (apps1_raw + apps2_raw) >> 1;\
+        uint32_t dt_sc = ECU_Config::SafeClamp(dt_ms, 1U, 100U); \
+\
+        int32_t t_f, r_f;\
+        if (load_critical) \{\
+            t_f = ECU_Config::SafeClamp(thr_raw, 0, 1024);\
+            r_f = rpm_raw;\
+        \} else \{\
+            t_f = thr_filt.update(ECU_Config::SafeClamp(thr_raw, 0, 1024));\
+            r_f = rpm_filt.update(rpm_raw);\
+        \}\
+\
+        int32_t delta_thr = ECU_Config::SafeAbs(t_f - m_last_thr);\
+        int64_t agg_decay = 1024LL - ((14LL * static_cast<int64_t>(dt_sc) << 10) / 100); \
+        m_aggression = static_cast<int32_t>((static_cast<int64_t>(m_aggression) * agg_decay + (static_cast<int64_t>(delta_thr) * (1024LL - agg_decay))) >> 10);\
+        m_aggression = ECU_Config::SafeClamp(m_aggression, 0, 1024);\
+        m_last_thr = t_f;\
+\
+        int32_t tq_a = static_cast<int32_t>((static_cast<int64_t>(t_f) * 640) >> ECU_Config::FP_SHIFT);\
+        int32_t tq_b = static_cast<int32_t>((static_cast<int64_t>(thr_raw) * 1280) / 2048); \
+\
+        if (!load_high) \{\
+            int32_t err = tq_b - tq_a;\
+            if (ECU_Config::SafeAbs(err) < ECU_Config::VOTING_MARGIN) \{\
+                int32_t current = m_adaptive_trim.load();\
+                current += static_cast<int32_t>((static_cast<int64_t>(err) * ECU_Config::TRIM_GAIN * dt_sc) >> 11);\
+                current = static_cast<int32_t>((static_cast<int64_t>(current) * 2047LL) >> 11);\
+                m_adaptive_trim.store(ECU_Config::SafeClamp(current, -ECU_Config::MAX_TRIM, ECU_Config::MAX_TRIM));\
+                m_trim_momentum = ((m_trim_momentum * 1023) + ECU_Config::SafeAbs(current)) >> 10;\
+            \}\
+        \}\
+\
+        out.maintenance_required = (m_trim_momentum > ECU_Config::WEAR_LIMIT_WARNING);\
+        int32_t wear_factor = ECU_Config::SafeClamp(m_trim_momentum, 0, ECU_Config::WEAR_LIMIT_CRITICAL);\
+        out.service_est_km = ECU_Config::Lerp(30000, 0, (wear_factor * ECU_Config::FP_SCALE) / ECU_Config::WEAR_LIMIT_CRITICAL);\
+        \
+        if (out.maintenance_required) \{\
+            out.fault_msg = "SERVICE REQUIRED: ENGINE WEAR DETECTED";\
+            out.diag_cause = "ADAPTIVE FUEL TRIM AT LIMIT";\
+            out.diag_code = "MNT-TRM-01";\
+        \}\
+\
+        m_apps_drift_limit = ECU_Config::Lerp(ECU_Config::APPS_BASE_DIFF, ECU_Config::APPS_MAX_AGING, \
+                             ECU_Config::SafeClamp(m_trim_momentum / (ECU_Config::FP_SCALE / 10), 0, ECU_Config::FP_SCALE));\
+\
+        if (ECU_Config::SafeAbs(tq_a - tq_b) > ECU_Config::VOTING_MARGIN) m_fault_counter++;\
+        else if (m_fault_counter > 0) m_fault_counter--;\
+\
+        if (m_fault_counter >= ECU_Config::MAX_FAULT_CYCLES) \{ \
+            out.fault = true; out.bypass_active = true; \
+            out.fault_msg = "ECU ERROR: PERFORMANCE REDUCED";\
+            out.diag_cause = "TORQUE CALCULATION MISMATCH";\
+            out.diag_code = "TQ-VOT-01";\
+            RecordToBlackBox("TORQUE_VOTING_FAULT", apps1_raw, apps2_raw, rpm_raw, temp, boost_raw, tq_a, 0, cpu_usage_ticks);\
+            return out; \
+        \}\
+\
+        int32_t d_gain = tcu_event ? (ECU_Config::SMOOTHING_GAIN * 2) : ECU_Config::SMOOTHING_GAIN;\
+        m_resonance_buffer += static_cast<int32_t>((static_cast<int64_t>(tq_a - m_resonance_buffer) * (d_gain * dt_sc) / 10) >> 10);\
+        tq_a = m_resonance_buffer;\
+\
+        int32_t t_fac = ECU_Config::SafeClamp(static_cast<int32_t>((static_cast<int64_t>(temp - ECU_Config::TEMP_COLD_MIN) * ECU_Config::FP_SCALE) / (ECU_Config::TEMP_COLD_MAX - ECU_Config::TEMP_COLD_MIN)), 0, ECU_Config::FP_SCALE);\
+        int32_t pmax_timing = ECU_Config::Lerp(45, 45 + (r_f / 100) + (m_aggression / 32), t_fac);\
+        int32_t baro_fac = ECU_Config::SafeClamp(static_cast<int32_t>((static_cast<int64_t>(baro_raw) * ECU_Config::FP_SCALE) / 1013), ECU_Config::MIN_BARO_SCALE, ECU_Config::FP_SCALE);\
+        int32_t tq_lim = ECU_Config::Lerp((ECU_Config::FP_SCALE * 75) >> 7, ECU_Config::FP_SCALE, t_fac);\
+        tq_lim = (static_cast<int64_t>(tq_lim) * baro_fac) >> ECU_Config::FP_SHIFT;\
+\
+        if (temp < ECU_Config::TEMP_COLD_MAX) \{\
+            out.cold_limit_active = true;\
+            int32_t max_rise = static_cast<int32_t>((static_cast<int64_t>(ECU_Config::Lerp(8, 25, t_fac)) * dt_sc) / 10);\
+            tq_a = ECU_Config::SafeClamp(tq_a, 0, m_prev_final_tq + max_rise);\
+        \}\
+\
+        int32_t idx = ECU_Config::SafeClamp((boost_raw * 4) / (2 * ECU_Config::FP_SCALE), 0, 3);\
+        int32_t smoke = ECU_Config::ECO_MAP[idx] + ((static_cast<int64_t>(ECU_Config::RACE_MAP[idx] - ECU_Config::ECO_MAP[idx]) * m_aggression) >> 10);\
+        int32_t final_tq = (tq_a < smoke) ? tq_a : smoke;\
+        final_tq = (static_cast<int64_t>(final_tq) * tq_lim) >> ECU_Config::FP_SHIFT;\
+\
+        volatile int32_t v1 = final_tq, v2 = final_tq, v3 = final_tq;\
+        if (v1 != v2 || v2 != v3) \{ \
+            out.fault = true; out.bypass_active = true; \
+            out.fault_msg = "CRITICAL ECU ERROR: REBOOT REQUIRED";\
+            out.diag_cause = "CPU DATA CORRUPTION";\
+            out.diag_code = "TMR-FAIL-01";\
+            RecordToBlackBox("TMR_BITFLIP_FAULT", apps1_raw, apps2_raw, rpm_raw, temp, boost_raw, final_tq, 0, cpu_usage_ticks);\
+            return out; \
+        \}\
+        m_prev_final_tq = final_tq;\
+\
+        if (temp > ECU_Config::THERMAL_CRITICAL) m_thermal_cut_active = true;\
+        else if (temp < (ECU_Config::THERMAL_CRITICAL - ECU_Config::THERMAL_HYST)) m_thermal_cut_active = false;\
+\
+        if (m_thermal_cut_active) \{\
+            int32_t derate = ECU_Config::SafeClamp(ECU_Config::FP_SCALE - (temp - ECU_Config::THERMAL_CRITICAL) / 20, 0, ECU_Config::FP_SCALE);\
+            final_tq = (static_cast<int64_t>(final_tq) * derate) >> ECU_Config::FP_SHIFT;\
+            out.guardian_active = true;\
+            out.fault_msg = "ENGINE OVERHEATING: COOLING DOWN";\
+            out.diag_cause = "HIGH COOLANT TEMPERATURE";\
+            out.diag_code = "THERM-LMT-01";\
+        \}\
+\
+        int32_t rail = (450 * ECU_Config::FP_SCALE) + (static_cast<int64_t>(final_tq) * (30 + (m_aggression / 100)) / 10);\
+        rail = ECU_Config::SafeClamp(rail + m_adaptive_trim.load(), 0, ECU_Config::MAX_SAFE_RAIL);\
+\
+        out.rail_dac = (static_cast<uint64_t>(rail) * ECU_Config::DAC_MAX) / ECU_Config::MAX_SAFE_RAIL;\
+        out.injector_us = ECU_Config::SafeClamp(static_cast<uint32_t>(ECU_Config::BASE_INJECTOR_US + (rail / (2 * ECU_Config::FP_SCALE))), ECU_Config::BASE_INJECTOR_US, ECU_Config::MAX_INJECTOR_US);\
+        out.timing_advance_us = pmax_timing;\
+        out.aggression_pct = (m_aggression * 100) >> ECU_Config::FP_SHIFT;\
+        out.altitude_derate_pct = (baro_fac * 100) >> ECU_Config::FP_SHIFT;\
+        out.wdt_token = ECU_Config::WDT_KICK_MAGIC ^ (static_cast<uint32_t>(m_cycle_count & 0xFFFFFFFF) * 0x1F3F);\
+\
+        if (m_stack_guard != ECU_Config::STACK_MAGIC) \{ \
+            out.fault = true; out.bypass_active = true; \
+            out.fault_msg = "CRITICAL ECU ERROR: STOP SAFELY";\
+            out.diag_cause = "STACK OVERFLOW DETECTED";\
+            out.diag_code = "SEC-STK-01";\
+            RecordToBlackBox("STACK_CORRUPTION", apps1_raw, apps2_raw, rpm_raw, temp, boost_raw, final_tq, rail, cpu_usage_ticks);\
+        \}\
+        return out;\
+    \}\
+\};\
+}
