@@ -1,0 +1,151 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 #include <algorithm>\
+#include <cmath>\
+#include <atomic>\
+#include <cstdint>\
+#include <vector>\
+\
+#define VGT_PWM_REGISTER      (*(volatile uint32_t*)0x40001000)\
+#define FUEL_RAIL_DAC_REG     (*(volatile uint32_t*)0x40001004)\
+#define ADC_THROTTLE_CH       0\
+#define ADC_BOOST_CH          1\
+#define ADC_OIL_TEMP_CH       2\
+\
+class SSOD_Diesel_ECU_Master \{\
+private:\
+    std::atomic<float> VEHICLE_M\{1850.0f\};\
+    std::atomic<float> dynamic_Cd\{0.24f\};\
+    const float TIRE_R          = 0.330f;\
+    const float RHO_SEA_LEVEL   = 1.225f;\
+    const float dt              = 0.01f;\
+\
+    const float MAX_RAIL_BAR    = 2200.0f;\
+    const float SMOKE_LIMIT_AFR = 17.5f;\
+    float current_boost_bar     = 0.0f;\
+    \
+    float last_rpm              = 0.0f;\
+    float torque_reduction_timer = 0.0f;\
+    const float SHIFT_PROTECTION_TIME = 0.15f;\
+\
+    const float MIN_OIL_TEMP_OPERATIONAL = 75.0f;\
+    const float MAX_OIL_TEMP_CRITICAL    = 130.0f;\
+    float current_oil_temp               = 20.0f;\
+\
+    uint32_t cycle_counter = 0;\
+    bool system_ready = false;\
+\
+    enum HW4_Fault_Mask : uint32_t \{\
+        NONE = 0,\
+        SENSOR_SATURATION = 1 << 1,\
+        THERMAL_ALERT = 1 << 2,\
+        SMOKE_LIMIT_ACTIVE = 1 << 3,\
+        ECU_TIMING_ERROR = 1 << 4,\
+        SHIFT_PROTECTION_ACTIVE = 1 << 5,\
+        COLD_ENGINE_PROTECTION = 1 << 6,\
+        OVERHEAT_PROTECTION = 1 << 7\
+    \};\
+\
+public:\
+    struct ECUOutput \{\
+        float fuel_rail_pressure_bar;\
+        float vgt_vane_pos;\
+        float requested_torque_nm;\
+        float boost_pressure_bar_out;\
+        uint32_t fault_mask;\
+    \};\
+\
+    void update_physics_model(float actual_accel, float v, float engine_torque_nm, float pitch_rad) \{\
+        if (v < 2.0f) return;\
+        float driving_force = engine_torque_nm * (9.0f / TIRE_R);\
+        float gravity_f = VEHICLE_M.load() * 9.81f * std::sin(pitch_rad);\
+        float aero_f = 0.5f * RHO_SEA_LEVEL * std::pow(v, 2) * (dynamic_Cd.load() * 2.22f);\
+        float predicted_accel = (driving_force - gravity_f - aero_f) / VEHICLE_M.load();\
+        float error = actual_accel - predicted_accel;\
+        VEHICLE_M.store(std::clamp(VEHICLE_M.load() + (error * 0.005f), 1500.0f, 2800.0f));\
+    \}\
+\
+    ECUOutput execute_cycle(float throttle_pos, float v, float rpm, float pitch_rad, \
+                            float air_temp_c, float actual_boost_in, float oil_temp) \{\
+        ECUOutput out = \{0\};\
+        uint32_t current_faults = NONE;\
+        current_boost_bar = actual_boost_in;\
+        current_oil_temp = oil_temp;\
+\
+        if (last_rpm - rpm > 400.0f && v > 5.0f) \{\
+            torque_reduction_timer = SHIFT_PROTECTION_TIME;\
+        \}\
+        \
+        float available_air_mass = 1.0f + current_boost_bar;\
+        float max_safe_torque = available_air_mass * 450.0f;\
+        float requested_torque = throttle_pos * 600.0f; \
+\
+        float health_multiplier = 1.0f;\
+        if (current_oil_temp < MIN_OIL_TEMP_OPERATIONAL) \{\
+            health_multiplier = 0.4f + (0.6f * (std::max(0.0f, current_oil_temp - 20.0f) / 55.0f));\
+            current_faults |= COLD_ENGINE_PROTECTION;\
+        \} else if (current_oil_temp > MAX_OIL_TEMP_CRITICAL - 10.0f) \{\
+            health_multiplier = std::max(0.3f, 1.0f - (current_oil_temp - 120.0f) * 0.07f);\
+            current_faults |= OVERHEAT_PROTECTION;\
+        \}\
+\
+        requested_torque *= health_multiplier;\
+\
+        if (torque_reduction_timer > 0.0f) \{\
+            requested_torque *= 0.4f;\
+            torque_reduction_timer -= dt;\
+            current_faults |= SHIFT_PROTECTION_ACTIVE;\
+        \}\
+\
+        if (requested_torque > max_safe_torque) \{\
+            requested_torque = max_safe_torque;\
+            current_faults |= SMOKE_LIMIT_ACTIVE;\
+        \}\
+\
+        out.requested_torque_nm = requested_torque;\
+        out.vgt_vane_pos = std::clamp(1.0f - (throttle_pos * 0.9f), 0.1f, 0.95f);\
+        \
+        float target_rail = 400.0f + (out.requested_torque_nm * 3.0f);\
+        out.fuel_rail_pressure_bar = std::clamp(target_rail, 400.0f, MAX_RAIL_BAR * health_multiplier);\
+\
+        update_physics_model(v, v, out.requested_torque_nm, pitch_rad);\
+        \
+        last_rpm = rpm;\
+        out.boost_pressure_bar_out = current_boost_bar;\
+        out.fault_mask = current_faults;\
+        cycle_counter++;\
+        return out;\
+    \}\
+\
+    void IRQ_10ms_Handler() \{\
+        float raw_throttle = (float)HAL_ADC_Read(ADC_THROTTLE_CH) / 4095.0f;\
+        float raw_boost = (float)HAL_ADC_Read(ADC_BOOST_CH) * 0.0012f;\
+        float raw_oil_temp = ((float)HAL_ADC_Read(ADC_OIL_TEMP_CH) * 0.1f) - 50.0f;\
+        \
+        float current_v = HAL_CAN_GetSpeed();\
+        float current_rpm = HAL_CAN_GetRPM();\
+        float pitch = HAL_IMU_GetPitch();\
+        float temp = HAL_Sensor_GetAmbientTemp();\
+\
+        ECUOutput result = execute_cycle(raw_throttle, current_v, current_rpm, pitch, temp, raw_boost, raw_oil_temp);\
+\
+        VGT_PWM_REGISTER = (uint32_t)(result.vgt_vane_pos * 1000.0f);\
+        FUEL_RAIL_DAC_REG = (uint32_t)((result.fuel_rail_pressure_bar / MAX_RAIL_BAR) * 4095.0f);\
+        \
+        HAL_CAN_Transmit_TorqueRequest(result.requested_torque_nm);\
+    \}\
+\
+    void RTOS_Task_Entry(void *pvParameters) \{\
+        system_ready = true;\
+        for(;;) \{\
+            IRQ_10ms_Handler();\
+            OS_Delay(10); \
+        \}\
+    \}\
+\};\
+}

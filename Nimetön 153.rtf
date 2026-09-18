@@ -1,0 +1,57 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 void update_ssod_v10_core(MotorState ms, DriveState ds) \{\
+    float i_phase = ms.phase_currents;\
+    float v_bus = ms.voltage_v;\
+    float t_cmd = ds.target_torque;\
+\
+    float t_feedback = (i_phase * v_bus) * 0.98f;\
+    float torque_jitter = abs(t_feedback - t_cmd) * 0.01f;\
+\
+    float fz = (ds.car_mass * 9.81f) + (ds.imu_accel_z * ds.car_mass);\
+    float sigma_t = 0.000085f * (ds.tire_temp - 20.0f);\
+    float r_dyn = R_NOMINAL - (fz / K_TYRE) + (sigma_t * R_NOMINAL);\
+\
+    float w_ref = ds.ground_speed / r_dyn;\
+\
+    if (torque_jitter < 0.12f && ds.confidence > 0.95f) \{\
+        float w_opt = w_ref * 1.025f;\
+        set_inverter_frequency(w_opt);\
+    \} else \{\
+        set_inverter_frequency(w_ref);\
+    \}\
+\
+    if (abs(torque_jitter) > 0.5f) \{\
+        trigger_guardian_fallback();\
+    \}\
+\}\
+\
+\
+\
+\
+def update_ssod_v10_core(phase_currents, voltage_v, target_torque, ground_speed, imu_accel_z, tire_temp, car_mass, confidence):\
+    t_feedback = (phase_currents * voltage_v) * 0.98\
+    torque_jitter = abs(t_feedback - target_torque) * 0.01\
+\
+    fz = (car_mass * 9.81) + (imu_accel_z * car_mass)\
+    sigma_t = 0.000085 * (tire_temp - 20.0)\
+    r_dyn = R_NOMINAL - (fz / K_TYRE) + (sigma_t * R_NOMINAL)\
+\
+    w_ref = ground_speed / r_dyn\
+\
+    if torque_jitter < 0.12 and confidence > 0.95:\
+        target_w = w_ref * 1.025\
+    else:\
+        target_w = w_ref\
+\
+    if abs(torque_jitter) > 0.5:\
+        trigger_guardian_fallback()\
+        \
+    return target_w\
+\
+}

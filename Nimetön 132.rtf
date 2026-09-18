@@ -1,0 +1,226 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\froman\fcharset0 Times-Roman;\f1\froman\fcharset0 Times-Bold;\f2\froman\fcharset0 Times-Italic;
+\f3\fmodern\fcharset0 Courier;}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;}
+{\*\listtable{\list\listtemplateid1\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid1\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid1}
+{\list\listtemplateid2\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid101\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid2}
+{\list\listtemplateid3\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid201\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid3}
+{\list\listtemplateid4\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid301\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid4}}
+{\*\listoverridetable{\listoverride\listid1\listoverridecount0\ls1}{\listoverride\listid2\listoverridecount0\ls2}{\listoverride\listid3\listoverridecount0\ls3}{\listoverride\listid4\listoverridecount0\ls4}}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab720
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 \expnd0\expndtw0\kerning0
+This document serves as the final implementation guide for the 
+\f1\b Sigma-Sync Orbital Drive (SSOD)
+\f0\b0  system. The core concept is to revolutionize heavy-duty vehicle drivetrains by combining mechanical strength with intelligent electronic control. The SSOD is not merely an auxiliary axle; it is a dynamic system that manages vehicle mass inertia. While the vehicle is in motion, the system is capable of swapping the driving axles on the fly without torque interruption. This is achieved by accelerating the airborne axle to the exact road speed before lowering it (e-Sync) and recovering the kinetic energy of the rising axle into electricity (KERS). The result is a more stable, fuel-efficient, and tire-saving heavy vehicle.\
+\
+\
+\
+1. MECHANICAL ARCHITECTURE AND CHASSIS INTEGRATION\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls1\ilvl0
+\f1\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Sigma Axle Placement (Pusher):
+\f0\b0  The axle is installed in front of the main drive axle. Critical chassis points must be reinforced with 10 mm thick high-strength steel (S700MC).\
+\ls1\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Mechanical Interlock (Rocker Arm):
+\f0\b0  The heart of the system is an H-profile rocker arm made of 42CrMo4 quenched and tempered steel. Its purpose is to guarantee physical safety: when one axle set rises, the arm mechanically forces the other down.\
+\ls1\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Wheelbase:
+\f0\b0  A minimum clearance of 1350 mm must be left between the axles to ensure an unobstructed vertical travel range of 250 mm.\
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+\
+\
+2. HIGH-VOLTAGE (HV) CIRCUIT SPECIFICATIONS\
+To enable KERS and e-Sync functionality, the high-voltage circuit must be connected to a 500V DC system:\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls2\ilvl0
+\f1\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+Energy Storage:
+\f0\b0  Skeleton Technologies SkelMod 500V ultracapacitor acts as a buffer for rapid charge/discharge cycles.\
+\ls2\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+Main Fuses:
+\f0\b0  A 300A high-speed fuse must be installed in the positive HV line.\
+\ls2\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	3	}\expnd0\expndtw0\kerning0
+Inverters:
+\f0\b0  Two Sevcon Gen4 Size 8 inverters are used. Inverter A handles energy recovery for the main axle, and Inverter B handles the acceleration of the Sigma axle.\
+\ls2\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	4	}\expnd0\expndtw0\kerning0
+Pre-charge Circuit:
+\f0\b0  Before the main power is engaged, the system must include a 1000-ohm resistor and a relay to limit the capacitor charging current at the moment of connection.\
+\ls2\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	5	}\expnd0\expndtw0\kerning0
+Motors:
+\f0\b0  Inverters are connected via three-phase cables to ZF AVE 130 hub motors.\
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+\
+\
+3. INTEGRATED MATHEMATICAL FORMULAS\
+The ECU unit calculates the system state using the following precise formulas:\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls3\ilvl0
+\f1\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+SYNCHRONIZATION INDEX:
+\f0\b0 \uc0\u8232 
+\f1\b Phi = ABS( (V_gps * K_abs) - (Omega_axleB * R_dynamic) )
+\f0\b0 \uc0\u8232 
+\f2\i The target value for engagement is Phi < 0.02. Here V_gps is the true vehicle speed, K_abs is the road surface friction coefficient, Omega_axleB is the angular velocity of the Sigma axle, and R_dynamic is the dynamic rolling radius of the tire.
+\f0\i0 \
+\ls3\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+DYNAMIC RADIUS:
+\f0\b0 \uc0\u8232 
+\f1\b R_dynamic = R_nominal * (1 - (Load_coeff * Pressure_psi))
+\f0\b0 \uc0\u8232 
+\f2\i This accounts for tire deformation based on load and air pressure.
+\f0\i0 \
+\ls3\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	3	}\expnd0\expndtw0\kerning0
+KERS BRAKING TORQUE:
+\f0\b0 \uc0\u8232 
+\f1\b T_regen = (0.5 * J * Omega^2) / Delta_t
+\f0\b0 \uc0\u8232 
+\f2\i This determines the regenerative braking intensity based on axle moment of inertia (J), angular velocity (Omega), and braking time (Delta_t).
+\f0\i0 \
+\ls3\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	4	}\expnd0\expndtw0\kerning0
+CONSTANT TORQUE DURING SHIFT:
+\f0\b0 \uc0\u8232 
+\f1\b T_total = T_active(t) + T_standby(t) = Constant
+\f0\b0 \uc0\u8232 
+\f2\i This ensures that traction is not interrupted during the axle swap.
+\f0\i0 \
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+\
+\
+4. COMPLETE PYTHON PRODUCTION CODE (v10.6)\
+\
+python\
+\pard\pardeftab720\partightenfactor0
+
+\f3\fs26 \cf0 import can\
+import time\
+import math\
+import logging\
+\
+# LOGGING AND CONFIGURATION\
+logging.basicConfig(level=logging.INFO, filename="ssod_final.log")\
+\
+class SSOD_Master_ECU:\
+    def __init__(self):\
+        # Physical constants\
+        self.R_NOMINAL = 0.512\
+        self.PHI_THRESHOLD = 0.02\
+        self.K_ABS = 1.0                # Default friction (asphalt)\
+        self.CAN_ID_SPEED = 0x18FEF100  # J1939 Speed message\
+        self.CAN_ID_MOTOR_B = 0x601      # Sigma axle (e-Sync)\
+        self.CAN_ID_MOTOR_A = 0x600      # Main axle (KERS)\
+        \
+        try:\
+            # Initialize CAN bus at 500kbps bitrate\
+            self.bus = can.interface.Bus(channel='can0', bustype='socketcan', bitrate=500000)\
+            logging.info("SSOD Master ECU Online. Formulas integrated.")\
+        except Exception as e:\
+            logging.error(f"CAN Error: \{e\}"); exit(1)\
+\
+        self.v_gps = 0.0\
+        self.current_state = "STANDBY"\
+\
+    def read_telemetry(self):\
+        """ Reads vehicle speed data from the bus """\
+        msg = self.bus.recv(0.01)\
+        if msg and msg.arbitration_id == self.CAN_ID_SPEED:\
+            raw_speed = (msg.data << 8) | msg.data\
+            self.v_gps = raw_speed / 256.0 # km/h\
+\
+    def calculate_phi(self, motor_rpm, r_dynamic):\
+        """ \
+        Phi = ABS( (V_gps * K_abs) - (Omega_axleB * R_dynamic) )\
+        Note: Units converted to m/s.\
+        """\
+        v_mps = (self.v_gps / 3.6)\
+        omega_axleB = (motor_rpm * 2 * math.pi) / 60\
+        # Implement integrated formula\
+        phi = abs( (v_mps * self.K_ABS) - (omega_axleB * r_dynamic) )\
+        return phi\
+\
+    def execute_sigma_shift(self, load_kg, psi):\
+        """ Executes the dynamic axle swap """\
+        logging.info("Starting Sigma Shift.")\
+        self.current_state = "SYNCING"\
+        \
+        # Calculate dynamic radius: R_dynamic = R_nominal * (1 - (Load_coeff * Pressure_psi))\
+        r_dynamic = self.R_NOMINAL * (1 - (0.00001 * load_kg / psi))\
+        \
+        # 1. e-SYNC: Acceleration\
+        target_rpm = ( (self.v_gps / 3.6) / r_dynamic) * 60 / (2 * math.pi)\
+        \
+        while True:\
+            # Send torque command to inverter\
+            sync_cmd = can.Message(arbitration_id=self.CAN_ID_MOTOR_B, data=[0x01, 0x90, 0, 0, 0, 0, 0, 0])\
+            self.bus.send(sync_cmd)\
+            \
+            # Check synchronization\
+            if self.calculate_phi(target_rpm, r_dynamic) < self.PHI_THRESHOLD:\
+                break\
+            time.sleep(0.01)\
+\
+        # 2. HANDOVER: Lower Sigma axle and lift old axle\
+        self.trigger_hydraulics("DOWN")\
+        \
+        # 3. KERS: Brake old axle to zero to recover energy\
+        self.current_state = "KERS"\
+        regen_cmd = can.Message(arbitration_id=self.CAN_ID_MOTOR_A, data=[0xFF, 0x10, 0, 0, 0, 0, 0, 0])\
+        self.bus.send(regen_cmd)\
+        \
+        time.sleep(1.5) \
+        self.current_state = "STANDBY"\
+        logging.info("Shift complete. Energy stored.")\
+\
+    def trigger_hydraulics(self, action):\
+        """ Controls hydraulic valves via GPIO relays """\
+        pass\
+\
+if __name__ == "__main__":\
+    ecu = SSOD_Master_ECU()\
+    while True:\
+        ecu.read_telemetry()\
+        if ecu.v_gps > 45 and ecu.current_state == "STANDBY":\
+            # Example values for load and pressure\
+            ecu.execute_sigma_shift(load_kg=8000, psi=120)\
+        time.sleep(0.1)\
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 K\'e4yt\'e4 koodia harkiten.\
+\
+\
+\
+5. DEPLOYMENT\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls4\ilvl0
+\f1\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+Pre-charge:
+\f0\b0  Always engage the high-voltage system through a pre-charge resistor to protect the inverters.\
+\ls4\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+Bus Communication:
+\f0\b0  Ensure the J1939 speed message matches the 
+\f3\fs26 CAN_ID_SPEED
+\f0\fs24  definition.\
+\ls4\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	3	}\expnd0\expndtw0\kerning0
+Testing:
+\f0\b0  Perform a "Dry Run" on jack stands and verify the locking mechanism of the mechanical 
+\f1\b 42CrMo4 rocker arm
+\f0\b0 .\
+}

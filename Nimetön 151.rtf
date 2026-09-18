@@ -1,0 +1,158 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\froman\fcharset0 Times-Roman;\f1\froman\fcharset0 Times-Bold;\f2\fmodern\fcharset0 Courier;
+}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;}
+{\*\listtable{\list\listtemplateid1\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid1\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid1}}
+{\*\listoverridetable{\listoverride\listid1\listoverridecount0\ls1}}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab720
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 \expnd0\expndtw0\kerning0
+PATENTTIHAKEMUS: SSOD-V10 RESILIENT DUAL-CORE\
+\pard\pardeftab720\partightenfactor0
+
+\f1\b \cf0 HAKEMUSNUMERO:
+\f0\b0  FI-2024-SSOD-V10-RE\
+
+\f1\b KEKSINN\'d6N NIMI:
+\f0\b0  J\'e4rjestelm\'e4 ja menetelm\'e4 ajoneuvon kineettisen synkronoinnin, energianhallinnan ja vikasietoisen operoinnin optimoimiseksi hajautetun reunalaskennan, dynaamisen s\'e4demallinnuksen ja redundantein sensorifuusion avulla.\
+\
+\
+\
+I. TEKNINEN SELITYS JA ARKITEHTUURI\
+Keksint\'f6 k\'e4sitt\'e4\'e4 kolme kerrosta: 
+\f1\b Edge
+\f0\b0  (napa-analyysi), 
+\f1\b Kernel
+\f0\b0  (strateginen hallinta) ja 
+\f1\b Guardian
+\f0\b0  (vikasietoisuus ja diagnostiikka).\
+\
+1. Reunalaskenta ja redundanssi (Edge V2)\
+Jokaisessa py\'f6r\'e4nnavassa on ESP-V2-prosessori, joka laskee kitkakertoimen ja valvoo sensorin eheytt\'e4.\
+\
+cpp\
+\pard\pardeftab720\partightenfactor0
+
+\f2\fs26 \cf0 // SSOD-V10 EDGE GUARDIAN ESP-V2\
+float get_validated_friction(float* acoustic_buffer, float temp_surface) \{\
+    // 1. FFT-analyysi ja spektritunnistus\
+    float friction_mu = perform_spectral_fingerprinting(acoustic_buffer);\
+    \
+    // 2. FAIL-SAFE: Signaalin laadun tarkistus (SNR)\
+    float snr = calculate_signal_to_noise(acoustic_buffer);\
+    if (snr < 1.8) \{ \
+        return -1.0; // Virhekoodi: Anturi peittynyt tai vaurioitunut\
+    \}\
+\
+    // 3. Termodynaaminen korjaus\
+    float sigma_temp = (temp_surface - 20.0) * 0.002;\
+    return friction_mu - sigma_temp;\
+\}\
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 K\'e4yt\'e4 koodia harkiten.\
+\
+2. Dynaaminen s\'e4de ja hallintalogiikka (Main Kernel)\
+Keskusyksikk\'f6 laskee renkaan todellisen muodon ja reagoi Edge-kerroksen virhekoodeihin.\
+\
+cpp\
+\pard\pardeftab720\partightenfactor0
+
+\f2\fs26 \cf0 // SSOD-V10 KERNEL CORE\
+float calculate_safe_torque(PhysicsState ps, SystemStatus status) \{\
+    // Jos Edge-kerros raportoi virheen, k\'e4ytet\'e4\'e4n konservatiivista arvoa\
+    if (status == DEGRADED) \{\
+        ps.current_mu = 0.4; // Turvallinen oletusarvo liukkaalle\
+    \}\
+\
+    // R_DYN LASKENTA (Kuorma + L\'e4mp\'f6laajeneminen)\
+    float R_DYN = R_NOMINAL - (ps.Fz_load / K_TYRE) + (0.000085 * ps.temp_internal * R_NOMINAL);\
+    \
+    float w_target = ps.ground_speed / R_DYN;\
+\
+    // LAUNCH & TRACTION CONTROL (Optimoidulla 2% mikroluistolla)\
+    if (ps.current_mu > 0.8 && status == OPTIMAL) \{\
+        return w_target * 1.02; \
+    \}\
+    return w_target;\
+\}\
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 K\'e4yt\'e4 koodia harkiten.\
+\
+\
+\
+II. PATENTTIVAATIMUKSET (CLAIMS)\
+\pard\pardeftab720\partightenfactor0
+
+\f1\b \cf0 Vaatimus 1:
+\f0\b0  J\'e4rjestelm\'e4 ajoneuvon hallintaan, joka hy\'f6dynt\'e4\'e4 akustista spektrianalyysia (FFT) tienpinnan kitkakertoimen (MU) m\'e4\'e4ritt\'e4miseksi, tunnistettuna siit\'e4, ett\'e4 j\'e4rjestelm\'e4 sis\'e4lt\'e4\'e4 
+\f1\b Guardian-moduulin
+\f0\b0 , joka vertaa akustista dataa kiihtyvyysanturien tuottamaan mekaaniseen vasteeseen ja hylk\'e4\'e4 ep\'e4johdonmukaisen datan.\
+
+\f1\b Vaatimus 2:
+\f0\b0  Menetelm\'e4 renkaan dynaamisen s\'e4teen (
+\f2\fs26 R_DYN
+\f0\fs24 ) laskemiseksi reaaliajassa, jossa:\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls1\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+Huomioidaan pystysuuntainen kuorma (
+\f2\fs26 Fz
+\f0\fs24 ) ja renkaan pystyj\'e4ykkyys (
+\f2\fs26 K_TYRE
+\f0\fs24 ).\
+\ls1\ilvl0\kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+Huomioidaan l\'e4mp\'f6laajeneminen (
+\f2\fs26 SIGMA_THERM
+\f0\fs24 ).\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls1\ilvl0
+\f1\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	3	}\expnd0\expndtw0\kerning0
+Uusi lis\'e4ys:
+\f0\b0  J\'e4rjestelm\'e4 kalibroi 
+\f2\fs26 K_TYRE
+\f0\fs24 -vakion itseoppivasti vertaamalla optista maanopeutta ja py\'f6rint\'e4nopeutta vakaissa olosuhteissa.\
+\pard\pardeftab720\partightenfactor0
+
+\f1\b \cf0 Vaatimus 3:
+\f0\b0  Energianhallintayksikk\'f6, joka sis\'e4lt\'e4\'e4 superkapasitaattoripankin jarrutusenergian (
+\f2\fs26 DELTA_E
+\f0\fs24 ) nopeaan talteenottoon, ja joka on ohjelmoitu priorisoimaan mekaaninen jarrutusenergian talteenoton sijaan heti, kun 
+\f1\b Fail-Safe
+\f0\b0 -tila aktivoituu.\
+
+\f1\b Vaatimus 4:
+\f0\b0  Vikasietoinen ohjauslogiikka (Fail-Safe), joka siirt\'e4\'e4 j\'e4rjestelm\'e4n 
+\f1\b "Limp Home"
+\f0\b0  -tilaan tai perinteiseen ABS-logiikkaan, mik\'e4li akustisen sensorin signaali-kohinasuhde (SNR) laskee m\'e4\'e4ritetyn kynnysarvon alapuolelle (esim. mudan, lumen tai sensorivian vuoksi).\
+
+\f1\b Vaatimus 5:
+\f0\b0  Algoritmi, joka optimoi kiihtyvyyden sallimalla 1\'965 % hallitun mikroluiston vain silloin, kun sensorifuusion varmuustaso (Confidence Level) ylitt\'e4\'e4 95 %.\
+\
+\
+\
+III. TIIVISTELM\'c4\
+SSOD-V10 on maailman ensimm\'e4inen ajoneuvon hallintaj\'e4rjestelm\'e4, joka yhdist\'e4\'e4 
+\f1\b ennakoivan fysiikkamallinnuksen
+\f0\b0  ja 
+\f1\b itse-diagnosoivan vikasietoisuuden
+\f0\b0 . Se ei ainoastaan tee autosta nopeampaa ja energiatehokkaampaa, vaan se kykenee tunnistamaan omat virhetilansa ja reagoimaan niihin ennen kuin kuljettaja huomaa mit\'e4\'e4n.\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+}

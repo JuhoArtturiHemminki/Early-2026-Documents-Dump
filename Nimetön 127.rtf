@@ -1,0 +1,373 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 (function() \{\
+    const stage = document.createElement('div');\
+    stage.style = "position:fixed;top:0;left:0;width:100vw;height:100vh;background:#0d0d0d;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:'Inter', sans-serif;overflow:hidden;color:#e0e0e0;";\
+    stage.innerHTML = `\
+        <div style="width:1000px; padding:20px; background:#151515; border-radius:15px; box-shadow:0 20px 50px rgba(0,0,0,0.5); border:1px solid #222;">\
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:1px solid #333; padding-bottom:15px;">\
+                <div style="font-weight:800; letter-spacing:2px; color:#fff; font-size:18px;">SSOD <span style="color:#ff3e3e;">PROTOTYPE v9.5</span></div>\
+                <div id="status-tag" style="background:#ff3e3e; color:#000; padding:4px 12px; border-radius:20px; font-size:10px; font-weight:bold; letter-spacing:1px;">ACTIVE_DRIVE_A</div>\
+            </div>\
+            \
+            <canvas id="ssodCanvas" width="960" height="380" style="background:radial-gradient(circle, #1a1a1a 0%, #0d0d0d 100%); border-radius:10px; margin-bottom:20px;"></canvas>\
+            \
+            <div style="display:grid; grid-template-columns: 1fr 1.5fr 1fr; gap:20px;">\
+                <!-- NOPEUS JA VAIHDE -->\
+                <div style="background:#1a1a1a; padding:15px; border-radius:10px; border:1px solid #222; text-align:center;">\
+                    <div style="font-size:10px; color:#666; margin-bottom:5px; text-transform:uppercase;">Velocity</div>\
+                    <div id="kmh" style="font-size:32px; font-weight:200; color:#fff;">0 <span style="font-size:14px; color:#444;">km/h</span></div>\
+                    <div id="gear" style="margin-top:5px; font-weight:bold; color:#ff3e3e;">GEAR 1</div>\
+                </div>\
+\
+                <!-- ANALYYTTINEN KESKIPANEELI -->\
+                <div style="background:#1a1a1a; padding:15px; border-radius:10px; border:1px solid #222; display:flex; justify-content:space-around; align-items:center;">\
+                    <div style="text-align:center;">\
+                        <div style="font-size:10px; color:#666; margin-bottom:5px;">TURBO BOOST</div>\
+                        <div id="boost-bar" style="width:100px; height:6px; background:#333; border-radius:3px; overflow:hidden;">\
+                            <div id="boost-fill" style="width:0%; height:100%; background:#00d1ff; transition:width 0.1s;"></div>\
+                        </div>\
+                        <div id="boost-val" style="font-size:14px; margin-top:5px; color:#00d1ff; font-weight:bold;">0.00 bar</div>\
+                    </div>\
+                    <div style="text-align:center;">\
+                        <div style="font-size:10px; color:#666; margin-bottom:5px;">SAVINGS</div>\
+                        <div id="save-val" style="font-size:24px; color:#00ff88; font-weight:bold;">0.00 \'80</div>\
+                        <div style="font-size:10px; color:#444;">KERS OPTIMIZED</div>\
+                    </div>\
+                </div>\
+\
+                <!-- PHI-SYNC DATA -->\
+                <div style="background:#1a1a1a; padding:15px; border-radius:10px; border:1px solid #222; text-align:center;">\
+                    <div style="font-size:10px; color:#666; margin-bottom:5px;">PHI-INDEX SYNC</div>\
+                    <div id="phi" style="font-size:24px; color:#bd00ff; font-family:monospace;">0.0000</div>\
+                    <div id="sync-label" style="font-size:10px; color:#444; margin-top:5px;">WAITING...</div>\
+                </div>\
+            </div>\
+        </div>\
+        <button onclick="location.reload()" style="margin-top:20px; background:none; border:none; color:#444; cursor:pointer; font-size:11px; letter-spacing:1px;">RESTART SYSTEM</button>\
+    `;\
+    document.body.appendChild(stage);\
+\
+    const canvas = document.getElementById('ssodCanvas');\
+    const ctx = canvas.getContext('2d');\
+    \
+    // UI\
+    const kmhEl = document.getElementById('kmh');\
+    const gearEl = document.getElementById('gear');\
+    const boostFill = document.getElementById('boost-fill');\
+    const boostVal = document.getElementById('boost-val');\
+    const saveVal = document.getElementById('save-val');\
+    const phiEl = document.getElementById('phi');\
+    const statusTag = document.getElementById('status-tag');\
+    const syncLabel = document.getElementById('sync-label');\
+\
+    let kmh = 0;\
+    let frame = 0;\
+    let savedEur = 0;\
+    let posA = 300, posB = 220; // Y-koordinaatit\
+    let rpmA = 0, rpmB = 0;\
+    let rotA = 0, rotB = 0;\
+\
+    function draw() \{\
+        requestAnimationFrame(draw);\
+        frame++;\
+        ctx.clearRect(0, 0, canvas.width, canvas.height);\
+\
+        // --- FYSIIKKA & KIIHDYTYS ---\
+        if (kmh < 110) \{\
+            kmh += 0.06;\
+            savedEur += 0.0008;\
+        \} else \{\
+            kmh = 0;\
+            savedEur = 0;\
+        \}\
+\
+        let gear = Math.floor(kmh / 16) + 1;\
+        let groundRPM = kmh * 18.5;\
+        let shiftCycle = (kmh % 20);\
+        let isSyncing = shiftCycle > 12 && shiftCycle < 16;\
+        let isHandover = shiftCycle >= 16;\
+\
+        // --- AKSELIEN LIIKE (Interpolointi / Sulavuus) ---\
+        if (isHandover) \{\
+            posA = posA * 0.94 + 220 * 0.06; // Nostaa A\
+            posB = posB * 0.92 + 300 * 0.08; // Laskee B\
+            rpmB = groundRPM;\
+            rpmA = Math.max(0, rpmA - 2.5); // KERS jarrutus nollaan\
+            statusTag.innerText = "SIGMA_HANDOVER";\
+            statusTag.style.background = "#00d1ff";\
+        \} else \{\
+            posA = posA * 0.92 + 300 * 0.08; // Laskee A\
+            posB = posB * 0.94 + 220 * 0.06; // Nostaa B\
+            rpmA = groundRPM;\
+            if (isSyncing) \{\
+                rpmB = Math.min(groundRPM, rpmB + 3.5); // e-Sync kiihdytys ilmassa\
+                statusTag.innerText = "E-SYNCING";\
+                statusTag.style.background = "#bd00ff";\
+                syncLabel.innerText = "MATCHING SPEED...";\
+            \} else \{\
+                rpmB = Math.max(0, rpmB - 2.5); // KERS jarrutus nollaan\
+                statusTag.innerText = "DRIVE_A_ACTIVE";\
+                statusTag.style.background = "#ff3e3e";\
+                syncLabel.innerText = "STANDBY (0 RPM)";\
+            \}\
+        \}\
+\
+        // --- UI P\'c4IVITYKSET ---\
+        kmhEl.innerHTML = `$\{Math.floor(kmh)\} <span style="font-size:14px; color:#444;">km/h</span>`;\
+        gearEl.innerText = `GEAR $\{gear\}`;\
+        let bVal = Math.min(2.8, (kmh/40) + (isHandover?0.5:0));\
+        boostFill.style.width = (bVal/3 * 100) + "%";\
+        boostVal.innerText = bVal.toFixed(2) + " bar";\
+        saveVal.innerText = savedEur.toFixed(2) + " \'80";\
+        phiEl.innerText = isSyncing ? Math.abs(groundRPM - rpmB).toFixed(4) : (rpmB < 1 ? "0.0000" : "---");\
+\
+        // --- PIIRT\'c4MINEN ---\
+        // Tie (Sulava liike)\
+        ctx.fillStyle = "#222";\
+        for(let i=0; i<40; i++) \{\
+            let x = (i * 40 - (frame * (kmh*0.3)) % 40);\
+            ctx.fillRect(x, 335, 20, 2);\
+        \}\
+\
+        // Rekan runko (Muotoiltu)\
+        ctx.fillStyle = "#1a1a1a";\
+        ctx.beginPath();\
+        ctx.roundRect(250, 210, 500, 60, 5); // Alusta\
+        ctx.roundRect(620, 110, 140, 150, 10); // Ohjaamo\
+        ctx.fill();\
+        ctx.strokeStyle = "#333";\
+        ctx.lineWidth = 2;\
+        ctx.stroke();\
+\
+        const drawWheel = (x, y, color, rpm, label, active) => \{\
+            let speedFactor = rpm * 0.006;\
+            if (label === "A") rotA += speedFactor; else if (label === "B") rotB += speedFactor;\
+            let currentRot = (label === "A") ? rotA : (label === "B") ? rotB : frame * (kmh * 0.1);\
+\
+            ctx.save();\
+            ctx.translate(x, y);\
+            \
+            // Varjo maahan\
+            if (y > 280) \{\
+                ctx.fillStyle = "rgba(0,0,0,0.3)";\
+                ctx.beginPath();\
+                ctx.ellipse(0, 40, 35, 10, 0, 0, Math.PI*2);\
+                ctx.fill();\
+            \}\
+\
+            ctx.rotate(currentRot * Math.PI / 180);\
+            \
+            // Rengas\
+            ctx.beginPath();\
+            ctx.arc(0, 0, 32, 0, Math.PI * 2);\
+            ctx.fillStyle = "#0a0a0a";\
+            ctx.fill();\
+            ctx.strokeStyle = active ? color : "#333";\
+            ctx.lineWidth = 4;\
+            ctx.stroke();\
+\
+            // Vanne (Moderni)\
+            ctx.strokeStyle = "#222";\
+            ctx.lineWidth = 1;\
+            for(let i=0; i<6; i++) \{\
+                ctx.rotate(Math.PI/3);\
+                ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0,30); ctx.stroke();\
+            \}\
+            \
+            ctx.restore();\
+            \
+            // Tekstit renkaan p\'e4\'e4lle\
+            ctx.fillStyle = active ? color : "#444";\
+            ctx.font = "bold 10px Inter";\
+            ctx.textAlign = "center";\
+            ctx.fillText(label, x, y - 45);\
+            ctx.font = "9px Inter";\
+            ctx.fillText(Math.floor(rpm) + " RPM", x, y + 55);\
+        \};\
+\
+        // Py\'f6rien sijoittelu\
+        drawWheel(670, 300, "#666", groundRPM, "STEER", true);\
+        drawWheel(510, posB, "#00ff88", rpmB, "B", isHandover || isSyncing);\
+        drawWheel(380, posA, "#ff3e3e", rpmA, "A", !isHandover);\
+        drawWheel(270, 300, "#666", groundRPM, "TAG", true);\
+    \}\
+    draw();\
+\})();\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+(function() \{\
+    const stage = document.createElement('div');\
+    stage.style = "position:fixed;top:0;left:0;width:100vw;height:100vh;background:#050505;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:'Inter', sans-serif;overflow:hidden;color:#e0e0e0;";\
+    stage.innerHTML = `\
+        <div style="width:1000px; padding:25px; background:#111; border-radius:20px; box-shadow:0 30px 60px rgba(0,0,0,0.8); border:1px solid #222;">\
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:1px solid #333; padding-bottom:15px;">\
+                <div style="font-weight:800; letter-spacing:3px; color:#fff; font-size:20px;">SSOD <span style="color:#00ff88;">ELITE ANALYTICS</span></div>\
+                <div id="status-tag" style="background:#00ff88; color:#000; padding:5px 15px; border-radius:4px; font-size:11px; font-weight:900; letter-spacing:1px;">CONSTANT_TORQUE_ACTIVE</div>\
+            </div>\
+            \
+            <canvas id="ssodCanvas" width="950" height="350" style="background:#000; border-radius:10px; margin-bottom:25px; box-shadow: inset 0 0 50px rgba(0,255,136,0.05);"></canvas>\
+            \
+            <div style="display:grid; grid-template-columns: 1fr 1.2fr 1fr; gap:25px;">\
+                <div style="background:#151515; padding:20px; border-radius:12px; border:1px solid #222; text-align:center;">\
+                    <div style="font-size:10px; color:#666; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;">Velocity</div>\
+                    <div id="kmh" style="font-size:40px; font-weight:100; color:#fff;">0 <span style="font-size:16px; color:#444;">km/h</span></div>\
+                </div>\
+\
+                <div style="background:#151515; padding:20px; border-radius:12px; border:1px solid #222; text-align:center;">\
+                    <div style="font-size:10px; color:#666; margin-bottom:10px; text-transform:uppercase; letter-spacing:1px;">Turbocharged Stability</div>\
+                    <div id="boost-bar" style="width:100%; height:12px; background:#222; border-radius:6px; overflow:hidden; margin: 10px 0;">\
+                        <div id="boost-fill" style="width:0%; height:100%; background:linear-gradient(90deg, #0088ff, #00ff88); transition: width 0.3s cubic-bezier(0.1, 0.9, 0.2, 1);"></div>\
+                    </div>\
+                    <div id="boost-val" style="font-size:18px; color:#00ff88; font-weight:bold; font-family:monospace;">0.00 BAR</div>\
+                    <div style="font-size:9px; color:#444; margin-top:5px;">PRESSURE LOSS: 0.0% DURING SHIFT</div>\
+                </div>\
+\
+                <div style="background:#151515; padding:20px; border-radius:12px; border:1px solid #222; text-align:center;">\
+                    <div style="font-size:10px; color:#666; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px;">Fuel Saved (Cumulative)</div>\
+                    <div id="save-val" style="font-size:32px; color:#fff; font-weight:bold;">0.00 <span style="font-size:16px; color:#00ff88;">\'80</span></div>\
+                    <div style="font-size:9px; color:#444; margin-top:5px;">SIGMA-EFFICIENCY RATING: A+</div>\
+                </div>\
+            </div>\
+        </div>\
+    `;\
+    document.body.appendChild(stage);\
+\
+    const canvas = document.getElementById('ssodCanvas');\
+    const ctx = canvas.getContext('2d');\
+    const kmhEl = document.getElementById('kmh');\
+    const boostFill = document.getElementById('boost-fill');\
+    const boostVal = document.getElementById('boost-val');\
+    const saveVal = document.getElementById('save-val');\
+    const statusTag = document.getElementById('status-tag');\
+\
+    let kmh = 0, frame = 0, savedEur = 0;\
+    let posA = 280, posB = 200; \
+    let rpmA = 0, rpmB = 0;\
+    let rotA = 0, rotB = 0;\
+    let turboTarget = 2.45; // Vakaa tavoitepaine\
+\
+    function draw() \{\
+        requestAnimationFrame(draw);\
+        frame++;\
+        ctx.clearRect(0, 0, canvas.width, canvas.height);\
+\
+        // --- LIIKE- JA KIIHDYTYSFYSIIKKA ---\
+        if (kmh < 115) \{\
+            kmh += 0.05;\
+            savedEur += 0.0012; // S\'e4\'e4st\'f6 kiihtyy tasaisen paineen ansiosta\
+        \} else \{\
+            kmh = 0; savedEur = 0;\
+        \}\
+\
+        let groundRPM = kmh * 16.2;\
+        let shiftCycle = (kmh % 22);\
+        let isSyncing = shiftCycle > 14 && shiftCycle < 18;\
+        let isHandover = shiftCycle >= 18;\
+\
+        // VAKAA AHDINPAINE (SSOD:n ydin)\
+        // Paine nousee alussa, mutta vaihdon (handover) aikana se EI laske.\
+        let currentTurbo = Math.min(turboTarget, (kmh/20) + 1.2); \
+        \
+        // --- AKSELIEN INTERPOLOINTI ---\
+        if (isHandover) \{\
+            posA = posA * 0.95 + 200 * 0.05; \
+            posB = posB * 0.92 + 280 * 0.08;\
+            rpmB = groundRPM;\
+            rpmA = Math.max(0, rpmA - 2.0); // KERS jarrutus\
+            statusTag.innerText = "SIGMA_HANDOVER_ACTIVE";\
+            statusTag.style.background = "#0088ff";\
+        \} else \{\
+            posA = posA * 0.92 + 280 * 0.08; \
+            posB = posB * 0.95 + 200 * 0.05;\
+            rpmA = groundRPM;\
+            if (isSyncing) \{\
+                rpmB = Math.min(groundRPM, rpmB + 3.8); // e-Sync\
+                statusTag.innerText = "E-SYNC_SYNCHRONIZING";\
+                statusTag.style.background = "#bd00ff";\
+            \} else \{\
+                rpmB = Math.max(0, rpmB - 2.0); // KERS jarrutus\
+                statusTag.innerText = "DRIVE_A_STEADY_PULL";\
+                statusTag.style.background = "#00ff88";\
+            \}\
+        \}\
+\
+        // UI P\'c4IVITYS\
+        kmhEl.innerHTML = `$\{Math.floor(kmh)\} <span style="font-size:16px; color:#444;">km/h</span>`;\
+        boostFill.style.width = (currentTurbo / 3 * 100) + "%";\
+        boostVal.innerText = currentTurbo.toFixed(2) + " BAR";\
+        saveVal.innerHTML = `$\{savedEur.toFixed(2)\} <span style="font-size:16px; color:#00ff88;">\'80</span>`;\
+\
+        // --- VISUALISOINTI ---\
+        // Tie\
+        ctx.fillStyle = "#1a1a1a";\
+        for(let i=0; i<40; i++) \{\
+            let x = (i * 40 - (frame * (kmh*0.35)) % 40);\
+            ctx.fillRect(x, 315, 25, 2);\
+        \}\
+\
+        // Runko\
+        ctx.fillStyle = "#151515";\
+        ctx.beginPath();\
+        ctx.roundRect(200, 190, 550, 55, 5); \
+        ctx.roundRect(600, 90, 150, 150, 12); \
+        ctx.fill();\
+        ctx.strokeStyle = "#252525"; ctx.stroke();\
+\
+        const drawWheel = (x, y, color, rpm, label, active) => \{\
+            let speedFactor = rpm * 0.007;\
+            if (label === "A") rotA += speedFactor; else if (label === "B") rotB += speedFactor;\
+            let rot = (label === "A") ? rotA : (label === "B") ? rotB : frame * (kmh * 0.12);\
+\
+            ctx.save();\
+            ctx.translate(x, y);\
+            \
+            // Varjo\
+            if (y > 250) \{\
+                ctx.fillStyle = "rgba(0,255,136,0.03)";\
+                ctx.beginPath(); ctx.ellipse(0, 40, 40, 8, 0, 0, Math.PI*2); ctx.fill();\
+            \}\
+\
+            ctx.rotate(rot * Math.PI / 180);\
+            ctx.beginPath(); ctx.arc(0, 0, 34, 0, Math.PI * 2);\
+            ctx.fillStyle = "#080808"; ctx.fill();\
+            ctx.strokeStyle = active ? color : "#222"; ctx.lineWidth = 5; ctx.stroke();\
+            \
+            // Vanteet\
+            ctx.strokeStyle = "#151515";\
+            for(let i=0; i<5; i++) \{\
+                ctx.rotate(Math.PI*2/5); ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0,30); ctx.stroke();\
+            \}\
+            ctx.restore();\
+            \
+            ctx.fillStyle = active ? color : "#444";\
+            ctx.font = "900 11px Inter"; ctx.textAlign = "center";\
+            ctx.fillText(label, x, y - 48);\
+            ctx.font = "400 10px monospace";\
+            ctx.fillText(Math.floor(rpm) + " RPM", x, y + 55);\
+        \};\
+\
+        drawWheel(660, 280, "#555", groundRPM, "STEER", true);\
+        drawWheel(490, posB, "#00ff88", rpmB, "SIGMA", isHandover || isSyncing);\
+        drawWheel(350, posA, "#0088ff", rpmA, "DRIVE_A", !isHandover);\
+        drawWheel(210, 280, "#555", groundRPM, "TAG", true);\
+    \}\
+    draw();\
+\})();\
+}

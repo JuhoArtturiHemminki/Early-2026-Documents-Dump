@@ -1,0 +1,76 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 #include <algorithm>\
+#include <cmath>\
+\
+class TeslaGodModeController \{\
+private:\
+    const float R = 0.330f, MASS = 1850.0f, L = 2.875f, H_CG = 0.460f;\
+    const float CD = 0.23f, AREA = 2.22f, RHO = 1.225f;\
+\
+    float last_v = 0.0f;\
+    float mu_smooth = 1.0f;\
+    \
+    // GEAR-LASH MUUTTUJAT\
+    float last_torque_f = 0.0f;\
+    float last_torque_r = 0.0f;\
+\
+    // Aktiivinen v\'e4lyksen ylitys (Gear-Lash Buffer)\
+    float apply_gear_lash_guard(float target_t, float last_t) \{\
+        // Jos v\'e4\'e4nt\'f6 vaihtaa merkki\'e4 (negatiivisesta positiiviseksi), \
+        // menn\'e4\'e4n v\'e4lysalueen (-10Nm -> 10Nm) l\'e4pi kontrolloidusti.\
+        if ((last_t <= 0.0f && target_t > 0.0f) || (last_t >= 0.0f && target_t < 0.0f)) \{\
+            // Tesla k\'e4ytt\'e4\'e4 t\'e4ss\'e4 pehme\'e4\'e4 filtteri\'e4, me k\'e4yt\'e4mme "ramppia" \
+            // joka on 5x nopeampi mutta est\'e4\'e4 mekaanisen paukahduksen.\
+            return std::clamp(target_t, last_t - 50.0f, last_t + 50.0f);\
+        \}\
+        return target_t;\
+    \}\
+\
+public:\
+    struct Output \{ float f_torque; float r_torque; float status; \};\
+\
+    Output update(float pedal, float v_ms, float w_f, float w_r, float soc, float temp) \{\
+        \
+        // 1. ILMANVASTUS JA PITO-OBSERVER\
+        float drag_f = 0.5f * RHO * std::pow(v_ms, 2) * CD * AREA;\
+        float actual_a = (v_ms - last_v) / 0.001f;\
+        last_v = v_ms;\
+        \
+        if (actual_a < (mu_smooth * 9.81f) * 0.9f && v_ms > 2.0f) mu_smooth -= 0.015f;\
+        else if (mu_smooth < 1.25f) mu_smooth += 0.004f;\
+\
+        // 2. PAINONSIIRTO JA AERO-KUORMA\
+        float weight_x = (H_CG / L) * MASS * std::min(11.0f, (pedal * 12.0f));\
+        float aero_load = (drag_f * 0.6f) / L;\
+\
+        float n_f = (MASS * 9.81f * 0.48f) - weight_x - aero_load;\
+        float n_r = (MASS * 9.81f * 0.52f) + weight_x + aero_load;\
+\
+        // 3. TEHON JA L\'c4MM\'d6N HALLINTA (Limitless mode)\
+        float omega = v_ms / R;\
+        float avail_t = ((soc > 10.0f ? 500.0f : 300.0f) * 1000.0f) / std::max(5.0f, omega);\
+        float t_scale = (temp > 120.0f) ? 0.5f : 1.0f; // Nostettu kesto 120C asti\
+\
+        // 4. V\'c4\'c4NT\'d6JAKO (Traction limited)\
+        float raw_f = std::min(n_f * mu_smooth * R, avail_t * 0.4f) * pedal * t_scale;\
+        float raw_r = std::min(n_r * mu_smooth * R, avail_t * 0.8f) * pedal * t_scale;\
+\
+        // 5. GEAR-LASH MANAGEMENT (T\'e4ss\'e4 voitamme Teslan vasteajassa)\
+        // Kun Tesla "miettii" kaasun painalluksen j\'e4lkeen, meid\'e4n koodimme \
+        // on jo ylitt\'e4nyt v\'e4lyksen ja sy\'f6tt\'e4\'e4 voimaa.\
+        float final_f = apply_gear_lash_guard(raw_f, last_torque_f);\
+        float final_r = apply_gear_lash_guard(raw_r, last_torque_r);\
+\
+        last_torque_f = final_f;\
+        last_torque_r = final_r;\
+\
+        return \{ final_f, final_r, mu_smooth \};\
+    \}\
+\};\
+}

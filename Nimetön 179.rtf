@@ -1,0 +1,124 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 #include <algorithm>\
+#include <cmath>\
+\
+class SSOD_7_0_Apex \{\
+private:\
+    const float VEHICLE_M       = 1850.0f;\
+    const float TIRE_R          = 0.330f;\
+    const float G_ACCEL         = 9.81f;\
+    const float TRACK_WIDTH     = 1.600f; // Metrein\'e4\
+    const float CD_AREA         = 0.5106f;\
+    \
+    const float Kp              = 0.85f; \
+    const float Ki              = 0.18f; \
+    const float I_LIMIT         = 2.5f;\
+    const float SLEW_RATE_MAX   = 5000.0f;\
+    \
+    // UUDET: Kaarreajon vakiot\
+    const float MAX_LATERAL_G   = 0.85f; // Maksimi sivuttaispito\
+    const float CORNERING_GAIN  = 0.45f; // Kuinka paljon regen v\'e4henee kaarteessa\
+\
+    float error_integral        = 0.0f;\
+    float prev_safety_factor    = 1.0f;\
+    float last_regen_nm         = 0.0f;\
+    float filtered_v            = 0.0f;\
+    float dt                    = 0.01f;\
+\
+public:\
+    struct ActuationOutput \{\
+        float motor_torque_nm;\
+        float brake_force_n;\
+        bool abs_active;\
+        bool hold_active;\
+        float stability_reduction; // Diagnostiikka: paljonko tehoa rajoitettiin mutkassa\
+    \};\
+\
+    ActuationOutput execute_cycle(\
+        float req_decel, \
+        float raw_v, \
+        float t_cell, \
+        float current_soc, \
+        float pitch_rad, \
+        float wheel_slip,\
+        float steering_angle_rad, // UUSI: Ohjauskulma\
+        float yaw_rate_rads       // UUSI: Gironopeus (auton py\'f6riminen akselinsa ymp\'e4ri)\
+    ) \{\
+        filtered_v = (filtered_v * 0.8f) + (raw_v * 0.2f);\
+        \
+        if (std::isnan(filtered_v) || current_soc > 100.1f) \{\
+            return \{ 0.0f, 2500.0f, false, false, 0.0f \};\
+        \}\
+\
+        // 1. Kaarreajon analyysi (Cornering Stability)\
+        // Lasketaan sivuttaiskiihtyvyys: a_lat = v * yaw_rate\
+        float lateral_accel_g = std::abs(filtered_v * yaw_rate_rads) / G_ACCEL;\
+        \
+        // Lasketaan vakauskerroin: Mit\'e4 enemm\'e4n sivuttaisvoimaa, sit\'e4 v\'e4hemm\'e4n regen-momenttia sallitaan\
+        // K\'e4ytet\'e4\'e4n neli\'f6llist\'e4 suhdetta (Kamm's Circle approximation)\
+        float stability_factor = std::sqrt(std::max(0.0f, 1.0f - std::pow(lateral_accel_g / MAX_LATERAL_G, 2)));\
+        stability_factor = std::clamp(stability_factor, 0.3f, 1.0f); // J\'e4tet\'e4\'e4n v\'e4hint\'e4\'e4n 30% regen-kyvyst\'e4\
+\
+        // 2. Fysiikka ja ymp\'e4rist\'f6\
+        float air_temp_k = std::clamp(t_cell + 273.15f, 233.15f, 323.15f);\
+        float rho = 1.225f * (288.15f / air_temp_k); \
+        float gravity_force = VEHICLE_M * G_ACCEL * std::sin(pitch_rad);\
+        float aero_force = 0.5f * rho * std::pow(std::max(0.0f, filtered_v), 2) * CD_AREA;\
+        float natural_decel = (aero_force + gravity_force) / VEHICLE_M;\
+\
+        // 3. Hill Hold (P\'e4ivitetty)\
+        if (std::abs(filtered_v) < 0.15f && req_decel > 0.1f) \{\
+            error_integral = 0.0f;\
+            return \{ -(gravity_force * TIRE_R), 5500.0f, false, true, 0.0f \};\
+        \}\
+\
+        // 4. Akun ja l\'e4mm\'f6n rajoitukset\
+        float thermal_map = 1.0f / (1.0f + std::exp(-0.28f * (t_cell - 10.0f)));\
+        float soc_limit = std::pow(std::clamp((100.0f - current_soc) / 10.0f, 0.0f, 1.0f), 1.5f);\
+        float kw_limit = 195.0f * thermal_map * soc_limit;\
+\
+        // 5. Moottorin momenttilaskenta\
+        float target_net_decel = std::max(0.0f, req_decel - natural_decel);\
+        float angular_v = std::max(0.1f, (filtered_v / TIRE_R));\
+        float max_torque_nm = (kw_limit * 1000.0f) / (angular_v + 0.0001f);\
+        \
+        float smooth_target = (target_net_decel * Kp) + (error_integral * Ki);\
+        \
+        // Sovelletaan vakauskerroin ennen momentin asettamista\
+        float potential_torque = smooth_target * VEHICLE_M * TIRE_R * stability_factor;\
+\
+        if (potential_torque < max_torque_nm) \{\
+            error_integral += (target_net_decel * stability_factor) * dt;\
+            error_integral = std::clamp(error_integral, -I_LIMIT, I_LIMIT);\
+        \}\
+\
+        // 6. Luistonesto (Slip Control)\
+        float target_safety = 1.0f;\
+        bool abs_trigger = false;\
+        if (wheel_slip > 0.08f) \{ \
+            abs_trigger = true;\
+            target_safety = std::max(0.0f, 1.0f - ((wheel_slip - 0.08f) * 20.0f));\
+            error_integral *= 0.5f;\
+        \}\
+        \
+        float safety_factor = (prev_safety_factor * 0.7f) + (target_safety * 0.3f);\
+        prev_safety_factor = safety_factor;\
+\
+        // 7. Lopullinen Actuation\
+        float desired_regen = std::min(potential_torque, max_torque_nm) * safety_factor;\
+        float max_change = SLEW_RATE_MAX * dt;\
+        float final_regen_nm = std::clamp(desired_regen, last_regen_nm - max_change, last_regen_nm + max_change);\
+        \
+        last_regen_nm = final_regen_nm;\
+        float friction_needed = std::max(0.0f, (target_net_decel * VEHICLE_M) - (final_regen_nm / TIRE_R));\
+\
+        return \{ final_regen_nm, friction_needed, abs_trigger, false, (1.0f - stability_factor) \};\
+    \}\
+\};\
+}

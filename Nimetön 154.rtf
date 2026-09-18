@@ -1,0 +1,66 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 #define KT_MOTOR_CONSTANT 1.65f\
+#define K_TYRE 315000.0f\
+#define R_NOMINAL 0.365f\
+#define MAX_ALLOWED_ERROR 25.0f\
+\
+void update_ssod_v11_optimized(MotorState ms, DriveState ds) \{\
+    float t_feedback = ms.phase_currents * KT_MOTOR_CONSTANT * 0.985f;\
+    float torque_error = abs(t_feedback - ds.target_torque);\
+\
+    float fz = (ds.car_mass * 9.81f) + (ds.imu_accel_z * ds.car_mass);\
+    float sigma_t = 0.000092f * (ds.tire_temp - 22.0f);\
+    float r_dyn = R_NOMINAL - (fz / K_TYRE) + (sigma_t * R_NOMINAL);\
+\
+    float w_ref = ds.ground_speed / r_dyn;\
+    float slip_factor = (ds.tire_temp > 35.0f) ? 1.045f : 1.025f;\
+\
+    if (torque_error < MAX_ALLOWED_ERROR && ds.confidence > 0.97f) \{\
+        float w_opt = w_ref * slip_factor;\
+        set_inverter_frequency(w_opt);\
+    \} else \{\
+        set_inverter_frequency(w_ref);\
+    \}\
+\
+    if (torque_error > 85.0f || ds.confidence < 0.60f) \{\
+        trigger_guardian_fallback();\
+    \}\
+\}\
+\
+\
+\
+\
+\
+\
+\
+KT_MOTOR_CONSTANT = 1.65\
+K_TYRE = 315000.0\
+R_NOMINAL = 0.365\
+MAX_ALLOWED_ERROR = 25.0\
+\
+def update_ssod_v11_optimized(ms, ds):\
+    t_feedback = ms.phase_currents * KT_MOTOR_CONSTANT * 0.985\
+    torque_error = abs(t_feedback - ds.target_torque)\
+\
+    fz = (ds.car_mass * 9.81) + (ds.imu_accel_z * ds.car_mass)\
+    sigma_t = 0.000092 * (ds.tire_temp - 22.0)\
+    r_dyn = R_NOMINAL - (fz / K_TYRE) + (sigma_t * R_NOMINAL)\
+\
+    w_ref = ds.ground_speed / r_dyn\
+    slip_factor = 1.045 if ds.tire_temp > 35.0 else 1.025\
+\
+    if torque_error < MAX_ALLOWED_ERROR and ds.confidence > 0.97:\
+        w_opt = w_ref * slip_factor\
+        set_inverter_frequency(w_opt)\
+    else:\
+        set_inverter_frequency(w_ref)\
+\
+    if torque_error > 85.0 or ds.confidence < 0.60:\
+        trigger_guardian_fallback()\
+}

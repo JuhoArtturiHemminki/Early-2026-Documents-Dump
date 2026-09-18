@@ -1,0 +1,158 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 #include <algorithm>\
+#include <cmath>\
+#include <vector>\
+\
+class SSOD_11_3_Adaptive \{\
+private:\
+    float VEHICLE_M             = 1850.0f; \
+    const float TIRE_R          = 0.330f;\
+    const float SLEW_RATE_MAX   = 4500.0f;\
+    const float Kp              = 0.85f; \
+    const float Ki              = 0.15f; \
+    const float EFF_SWEET_SPOT  = 180.0f;\
+    const float WIND_DEADBAND   = 45.0f;\
+    \
+    float error_integral        = 0.0f;\
+    float last_regen_nm         = 0.0f;\
+    float wind_load_force       = 0.0f;\
+    float brake_disk_moisture   = 0.0f;\
+    const float dt              = 0.01f;\
+\
+    const float MAX_ACCEL_PLAUSIBLE = 12.0f;\
+    const float MAX_V_DELTA         = 5.0f;\
+    const float GEAR_RATIO          = 9.03f; \
+    float last_verified_v           = 0.0f;\
+\
+    float dynamic_Cd            = 0.23f;   \
+    float learning_rate         = 0.0001f; \
+    const float MIN_M           = 1500.0f; \
+    const float MAX_M           = 2800.0f; \
+\
+public:\
+    struct ActuationOutput \{\
+        float motor_torque_nm;\
+        float friction_brake_n;\
+        bool abs_active;\
+        float efficiency_index; \
+        bool system_degraded;\
+        float learned_mass;  \
+        float learned_cd;    \
+    \};\
+\
+    void learn_vehicle_parameters(float actual_accel, float v, float torque_nm, float pitch_rad) \{\
+        if (v < 5.0f || std::abs(actual_accel) < 0.1f) return; \
+\
+        float current_f_motor = torque_nm / TIRE_R;\
+        float gravity_f = VEHICLE_M * 9.81f * std::sin(pitch_rad);\
+        float aero_f = 0.5f * 1.225f * std::pow(v, 2) * (dynamic_Cd * 2.22f);\
+        \
+        float predicted_accel = (current_f_motor - gravity_f - aero_f) / VEHICLE_M;\
+        float accel_error = actual_accel - predicted_accel;\
+\
+        if (std::abs(torque_nm) > 100.0f) \{ \
+            VEHICLE_M = std::clamp(VEHICLE_M + (accel_error * learning_rate * 50.0f), MIN_M, MAX_M);\
+        \}\
+\
+        if (v > 22.0f) \{ \
+            dynamic_Cd = std::clamp(dynamic_Cd - (accel_error * learning_rate * 0.1f), 0.20f, 0.45f);\
+        \}\
+    \}\
+\
+    ActuationOutput execute_shielded_cycle(\
+        float req_decel, float raw_v, float t_cell, \
+        float pitch_rad, float imu_accel_x, float wheel_slip,\
+        bool wiper_active, float motor_rpm\
+    ) \{\
+        learn_vehicle_parameters(imu_accel_x, raw_v, last_regen_nm, pitch_rad);\
+\
+        bool current_cycle_degraded = false;\
+        float safe_imu_accel = imu_accel_x;\
+\
+        float v_from_rpm = (motor_rpm / 60.0f) * (2.0f * M_PI * TIRE_R) / GEAR_RATIO;\
+        \
+        if (std::abs(raw_v - v_from_rpm) > (std::abs(raw_v) * 0.10f + 1.0f)) \{\
+            current_cycle_degraded = true;\
+            raw_v = v_from_rpm; \
+        \}\
+\
+        if (std::isnan(raw_v) || std::isnan(imu_accel_x) || std::abs(raw_v - last_verified_v) > MAX_V_DELTA) \{\
+            current_cycle_degraded = true;\
+            safe_imu_accel = 0.0f;\
+        \}\
+\
+        if (std::abs(imu_accel_x) > MAX_ACCEL_PLAUSIBLE) \{\
+            current_cycle_degraded = true;\
+            safe_imu_accel = 0.0f;\
+        \}\
+        \
+        last_verified_v = raw_v;\
+\
+        float air_temp_k = std::clamp(t_cell + 273.15f, 233.15f, 323.15f);\
+        float rho = 1.225f * (288.15f / air_temp_k); \
+        float gravity_force = VEHICLE_M * 9.81f * std::sin(pitch_rad);\
+        float aero_force_est = 0.5f * rho * std::pow(std::max(0.0f, raw_v), 2) * (dynamic_Cd * 2.22f);\
+\
+        float current_f_motor = last_regen_nm / TIRE_R;\
+        float accel_diff = (current_f_motor / VEHICLE_M) - safe_imu_accel;\
+        float real_wind_force = (accel_diff * VEHICLE_M) - gravity_force - aero_force_est;\
+\
+        if (!current_cycle_degraded && std::abs(real_wind_force) > WIND_DEADBAND) \{\
+            wind_load_force = (wind_load_force * 0.95f) + (real_wind_force * 0.05f);\
+        \} else if (current_cycle_degraded) \{\
+            wind_load_force *= 0.99f;\
+        \}\
+\
+        float target_net_decel = std::max(0.0f, req_decel - ((aero_force_est + wind_load_force + gravity_force) / VEHICLE_M));\
+        \
+        if (raw_v > 0.1f) \{\
+            error_integral = std::clamp(error_integral + (target_net_decel * dt), -2.0f, 2.0f);\
+        \} else \{\
+            error_integral *= 0.8f;\
+        \}\
+\
+        float smooth_target_f = (target_net_decel * Kp) + (error_integral * Ki);\
+        float ideal_regen_nm = smooth_target_f * VEHICLE_M * TIRE_R;\
+\
+        if (std::abs(ideal_regen_nm - EFF_SWEET_SPOT) < 12.0f && raw_v > 8.0f) \{\
+            ideal_regen_nm = EFF_SWEET_SPOT;\
+        \}\
+\
+        float safety_scalar = 1.0f;\
+        bool abs_active = false;\
+        if (wheel_slip > 0.12f) \{\
+            abs_active = true;\
+            safety_scalar = std::max(0.0f, 1.0f - (wheel_slip - 0.12f) * 10.0f);\
+            error_integral *= 0.5f;\
+        \}\
+\
+        float limited_regen = std::clamp(ideal_regen_nm * safety_scalar, \
+                                         last_regen_nm - (SLEW_RATE_MAX * dt), \
+                                         last_regen_nm + (SLEW_RATE_MAX * dt));\
+        \
+        if (wiper_active) brake_disk_moisture = std::min(100.0f, brake_disk_moisture + 0.2f);\
+        else brake_disk_moisture = std::max(0.0f, brake_disk_moisture - 0.1f);\
+        \
+        float drying_force = (brake_disk_moisture > 50.0f) ? 75.0f : 0.0f;\
+        float friction_n = std::max(0.0f, (target_net_decel * VEHICLE_M) - (limited_regen / TIRE_R)) + drying_force;\
+\
+        last_regen_nm = limited_regen;\
+\
+        return \{ \
+            limited_regen, \
+            friction_n, \
+            abs_active, \
+            (limited_regen / (ideal_regen_nm + 0.1f)),\
+            current_cycle_degraded,\
+            VEHICLE_M,\
+            dynamic_Cd\
+        \};\
+    \}\
+\};\
+}

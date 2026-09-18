@@ -1,0 +1,79 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 #include <algorithm>\
+#include <cmath>\
+\
+class SSOD_Hardened_10_Plus \{\
+private:\
+    const float VEHICLE_M_BASE  = 1850.0f;\
+    const float TIRE_R          = 0.330f;\
+    const float G_ACCEL         = 9.81f;\
+    const float dt              = 0.01f;\
+\
+    // Paikalliset tilamuuttujat\
+    float estimated_mass        = 1850.0f;\
+    float brake_disk_moisture   = 0.0f;    // Arvioitu kosteus levyiss\'e4\
+    float wind_load_force       = 0.0f;    // Estimoi vastatuulen voiman\
+    float filtered_v            = 0.0f;\
+    float last_regen_nm         = 0.0f;\
+\
+public:\
+    struct ActuationOutput \{\
+        float motor_torque_nm;\
+        float brake_force_n;\
+        bool cleaning_active;\
+    \};\
+\
+    ActuationOutput execute_hardened_cycle(\
+        float req_decel, \
+        float raw_v, \
+        float pitch_rad, \
+        float wheel_slip,\
+        float motor_torque_actual, // Moottorin ilmoittama todellinen v\'e4\'e4nt\'f6\
+        float imu_accel_x,         // Kiihtyvyysanturin (IMU) lukema\
+        bool wiper_active          // Tuulilasinpyyhkij\'e4t p\'e4\'e4ll\'e4 (paikallinen tieto sateesta)\
+    ) \{\
+        filtered_v = (filtered_v * 0.9f) + (raw_v * 0.1f);\
+\
+        // 1. PAIKALLINEN TUULEN JA ILMANVASTUKSEN ESTIMOINTI (Sensor Fusion)\
+        // Lasketaan ero: (Moottorin voima - IMU kiihtyvyys) = Ulkoiset vastukset (Tuuli/M\'e4ki)\
+        float force_total = (motor_torque_actual / TIRE_R) - (estimated_mass * G_ACCEL * std::sin(pitch_rad));\
+        float expected_accel = force_total / estimated_mass;\
+        float accel_diff = expected_accel - imu_accel_x; \
+        \
+        // Jos ero on suuri ja tasainen, se on vastatuulta/ilmanvastusta\
+        wind_load_force = (wind_load_force * 0.99f) + (accel_diff * estimated_mass * 0.01f);\
+\
+        // 2. BRAKE DISC DRYING (Automaattinen kuivaus ilman netti\'e4)\
+        bool cleaning_active = false;\
+        float cleaning_force = 0.0f;\
+        if (wiper_active) \{\
+            brake_disk_moisture = std::min(100.0f, brake_disk_moisture + 0.5f);\
+        \} else \{\
+            brake_disk_moisture = std::max(0.0f, brake_disk_moisture - 0.1f);\
+        \}\
+\
+        // Jos levyt ovat m\'e4r\'e4t, k\'e4ytet\'e4\'e4n kitkajarruja kevyesti (0.5% paineella) kuivaamiseen\
+        if (brake_disk_moisture > 20.0f && filtered_v > 10.0f) \{\
+            cleaning_force = 150.0f; // Newtonia, l\'e4hes huomaamaton\
+            cleaning_active = true;\
+        \}\
+\
+        // 3. REGEN-MOMENTIN KORJAUS\
+        // V\'e4hennet\'e4\'e4n regen-pyynt\'f6\'e4 tuulikuorman verran, jotta hidastuvuus pysyy lineaarisena\
+        float target_force = (req_decel * estimated_mass) - wind_load_force;\
+        float final_regen_nm = std::clamp(target_force * TIRE_R, 0.0f, 4500.0f);\
+\
+        // 4. MEKAANISEN JARRUN LASKENTA\
+        float friction_needed = std::max(0.0f, target_force - (final_regen_nm / TIRE_R)) + cleaning_force;\
+\
+        last_regen_nm = final_regen_nm;\
+        return \{ final_regen_nm, friction_needed, cleaning_active \};\
+    \}\
+\};\
+}

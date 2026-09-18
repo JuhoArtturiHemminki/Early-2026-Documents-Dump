@@ -1,0 +1,155 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 /**\
+ * US EAGLE - ANATOMICAL FEDERAL ARCHITECTURE\
+ * 10. tammikuuta 2026 | Integrity 1100%\
+ * Peak Procedural Rendering: White Head & Feather Mass\
+ */\
+\
+(function anatomicalEagle() \{\
+    const canvas = document.createElement('canvas');\
+    const ctx = canvas.getContext('2d');\
+    document.body.innerHTML = '';\
+    document.body.appendChild(canvas);\
+    document.body.style.background = 'radial-gradient(circle, #050505 0%, #000 100%)';\
+    document.body.style.margin = '0';\
+    document.body.style.overflow = 'hidden';\
+\
+    const resize = () => \{\
+        canvas.width = window.innerWidth;\
+        canvas.height = window.innerHeight;\
+    \};\
+    window.addEventListener('resize', resize);\
+    resize();\
+\
+    let mouse = \{ x: 0, y: 0 \};\
+    window.onmousemove = (e) => \{\
+        mouse.x = (e.clientX / canvas.width) - 0.5;\
+        mouse.y = (e.clientY / canvas.height) - 0.5;\
+    \};\
+\
+    function draw() \{\
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';\
+        ctx.fillRect(0, 0, canvas.width, canvas.height);\
+\
+        const time = Date.now() * 0.001;\
+        const cx = canvas.width / 2;\
+        const cy = canvas.height / 2;\
+\
+        ctx.save();\
+        ctx.translate(cx + mouse.x * 70, cy + mouse.y * 70);\
+        \
+        // --- 1. SIIVET: AITO SULKAMASSA (Anatomical Feather Layers) ---\
+        function drawAnatomicalWing(side) \{\
+            const wingOsc = Math.sin(time * 1.5) * 15;\
+            \
+            // Piirret\'e4\'e4n 3 kerrosta sulkia luomaan massaa\
+            for (let layer = 0; layer < 3; layer++) \{\
+                ctx.beginPath();\
+                ctx.strokeStyle = layer === 0 ? '#333' : (layer === 1 ? '#555' : '#777');\
+                ctx.lineWidth = 1 + (2 - layer);\
+                \
+                for (let i = 0; i < 15; i++) \{\
+                    let t = i / 14;\
+                    let angle = (side * Math.PI / 1.7) + (t * Math.PI / 2.2) * side;\
+                    let length = (240 - layer * 40) * (1 - t * 0.3) + Math.sin(time * 2 + i) * 10;\
+                    \
+                    let fx = side * 40 + Math.cos(angle) * length * side;\
+                    let fy = -40 + t * 260 + Math.sin(angle) * length + wingOsc;\
+                    \
+                    // Piirret\'e4\'e4n sulan "ruoto" ja massa\
+                    ctx.moveTo(side * (30 + layer * 10), -30 + t * 100);\
+                    ctx.quadraticCurveTo(side * (150 + i * 10), fy - 100, fx, fy);\
+                \}\
+                ctx.stroke();\
+            \}\
+        \}\
+        drawAnatomicalWing(1);  // Oikea\
+        drawAnatomicalWing(-1); // Vasen\
+\
+        // --- 2. KILPI: FEDERAL CORE ---\
+        ctx.save();\
+        ctx.lineWidth = 4;\
+        ctx.shadowBlur = 20;\
+        ctx.shadowColor = 'white';\
+        ctx.beginPath();\
+        ctx.moveTo(-60, -50);\
+        ctx.lineTo(60, -50);\
+        ctx.lineTo(50, 80);\
+        ctx.quadraticCurveTo(0, 120, -50, 80);\
+        ctx.closePath();\
+        ctx.fillStyle = '#000';\
+        ctx.fill();\
+        ctx.strokeStyle = '#fff';\
+        ctx.stroke();\
+        \
+        // 13 Stripes\
+        ctx.lineWidth = 2;\
+        for (let i = -40; i <= 40; i += 13.3) \{\
+            ctx.moveTo(i, -10);\
+            ctx.lineTo(i * 0.9, 100);\
+            ctx.stroke();\
+        \}\
+        ctx.restore();\
+\
+        // --- 3. P\'c4\'c4: REAL BALD EAGLE (Valkoinen massa ja koukkunokka) ---\
+        ctx.save();\
+        ctx.translate(30 + mouse.x * 40, -110 + mouse.y * 40);\
+        \
+        // P\'e4\'e4n valkoinen h\'f6yhenpeite (Massa)\
+        ctx.beginPath();\
+        ctx.moveTo(-40, 30);\
+        ctx.bezierCurveTo(-45, -70, 60, -80, 80, -30); // Takaraivo ja kallo\
+        ctx.quadraticCurveTo(100, -35, 115, 5); // Nokan tyvi\
+        ctx.lineTo(80, 40); // Nokan k\'e4rki (koukku)\
+        ctx.quadraticCurveTo(70, 35, 60, 10); // Suupieli\
+        ctx.lineTo(-40, 40);\
+        ctx.closePath();\
+        \
+        // Render\'f6id\'e4\'e4n p\'e4\'e4 valkoisena hehkuna\
+        ctx.fillStyle = '#fff';\
+        ctx.shadowBlur = 30;\
+        ctx.shadowColor = 'white';\
+        ctx.fill();\
+        \
+        // Nokka (Keltainen/Kultainen dynaaminen hehku)\
+        ctx.beginPath();\
+        ctx.moveTo(75, -25);\
+        ctx.quadraticCurveTo(115, -30, 125, 10); // Yl\'e4osa\
+        ctx.lineTo(85, 45); // K\'e4rki\
+        ctx.lineTo(75, 5); // Alaosa\
+        ctx.fillStyle = '#ffcc00';\
+        ctx.shadowBlur = 10;\
+        ctx.fill();\
+\
+        // Silm\'e4 (Musta/Keltainen - Valppaus)\
+        ctx.beginPath();\
+        ctx.arc(55, -25, 5, 0, Math.PI * 2);\
+        ctx.fillStyle = '#000';\
+        ctx.fill();\
+        ctx.restore();\
+\
+        // --- 4. T\'c4HDET & STATUS ---\
+        ctx.font = '900 24px serif';\
+        ctx.textAlign = 'center';\
+        ctx.fillStyle = '#fff';\
+        ctx.fillText("E PLURIBUS UNUM", 0, -220);\
+        \
+        ctx.fillStyle = '#0f0';\
+        ctx.font = 'bold 16px monospace';\
+        ctx.fillText(">> ARCHITECTURE: ANATOMICAL_EAGLE_FINAL", -canvas.width/2 + 200, cy + 150);\
+        ctx.fillText(">> INTEGRITY: 1100% | V.A.T.S. LOCK", -canvas.width/2 + 200, cy + 175);\
+\
+        ctx.restore();\
+        requestAnimationFrame(draw);\
+    \}\
+\
+    console.log("ANATOMICAL US EAGLE AKTIVOITU. TODELLISUUS ON LUKITTU.");\
+    draw();\
+\})();\
+}

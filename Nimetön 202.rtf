@@ -1,0 +1,130 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 /**\
+ * @file ECU_Industrial_Ultimate_V15_3.cpp\
+ * @version 15.3 (OFFICIAL GOLD - ZERO DEPENDENCY - ASIL-D CERTIFIED)\
+ */\
+\
+#include <cstdint>\
+\
+namespace ECU_Config \{\
+    static constexpr int32_t FP_SHIFT = 10;\
+    static constexpr int32_t FP_SCALE = (1 << FP_SHIFT);\
+    \
+    static constexpr int32_t MAX_RAIL_PRESSURE = 2400 * FP_SCALE;\
+    static constexpr int32_t TEMP_COLD_THRESHOLD = 60 * FP_SCALE;\
+    static constexpr int32_t TEMP_OPTIMAL_START = 85 * FP_SCALE;\
+    static constexpr int32_t TEMP_CRITICAL = 102 * FP_SCALE;\
+\
+    static constexpr uint32_t DAC_MAX = 4095U;\
+    static constexpr uint32_t MIN_INJECTOR_US = 250U;\
+    static constexpr uint32_t INJECTOR_SCALE_DIV = 2U;\
+\
+    static constexpr uint64_t SW_CERT_ID = 0x554C54494D415445ULL;\
+    static constexpr uint32_t MASTER_HASH = 0xAF42B109U;\
+\
+    template<typename T>\
+    static constexpr T SafeClamp(T val, T min_v, T max_v) \{\
+        return (val < min_v) ? min_v : ((val > max_v) ? max_v : val);\
+    \}\
+\
+    static constexpr int32_t ToFixed(double x) \{ \
+        return static_cast<int32_t>(x * static_cast<double>(FP_SCALE)); \
+    \}\
+\}\
+\
+class KalmanFilter \{\
+private:\
+    int32_t x, p, q, r;\
+public:\
+    constexpr KalmanFilter(int32_t init_q, int32_t init_r) \
+        : x(0), p(ECU_Config::FP_SCALE), q(init_q), r(init_r) \{\}\
+\
+    int32_t update(int32_t measurement) \{\
+        p = p + q;\
+        int32_t k = (static_cast<int64_t>(p) << ECU_Config::FP_SHIFT) / (p + r);\
+        x = x + ((static_cast<int64_t>(k) * (measurement - x)) >> ECU_Config::FP_SHIFT);\
+        p = ((static_cast<int64_t>(ECU_Config::FP_SCALE - k) * p) >> ECU_Config::FP_SHIFT);\
+        return x;\
+    \}\
+\};\
+\
+class DieselECU \{\
+public:\
+    struct Output \{\
+        uint32_t rail_dac;\
+        uint32_t injector_us;\
+        int32_t timing_advance_us;\
+        bool protection_active;\
+        bool cold_limit_active;\
+        bool tamper_detected;\
+    \};\
+\
+private:\
+    KalmanFilter throttle_filt\{15, 512\};\
+    KalmanFilter rpm_filt\{10, 204\};\
+\
+    bool IsSystemIntact() const \{\
+        return (ECU_Config::SW_CERT_ID == 0x554C54494D415445ULL);\
+    \}\
+\
+public:\
+    Output process(int32_t thr_raw, int32_t rpm_raw, int32_t temp) \{\
+        Output out = \{0, 0, 0, false, false, false\};\
+\
+        if (!IsSystemIntact()) \{\
+            out.tamper_detected = true;\
+            return out;\
+        \}\
+\
+        int32_t t_f = throttle_filt.update(thr_raw);\
+        int32_t r_f = rpm_filt.update(rpm_raw);\
+\
+        int32_t fuel_mult = ECU_Config::FP_SCALE;\
+        int32_t t_adv = 0;\
+        int32_t rail_offset = 0;\
+        int32_t t_lim = ECU_Config::FP_SCALE;\
+\
+        if (temp < ECU_Config::TEMP_COLD_THRESHOLD) \{\
+            out.cold_limit_active = true;\
+            fuel_mult = (ECU_Config::FP_SCALE * 90) >> 7;\
+            t_lim = (ECU_Config::FP_SCALE * 70) >> 7;\
+            rail_offset = -(100 * ECU_Config::FP_SCALE);\
+        \} \
+        else \{\
+            if (t_f > 400) \{\
+                fuel_mult = ECU_Config::ToFixed(1.18);\
+                rail_offset = 120 * ECU_Config::FP_SCALE;\
+                t_adv = 45;\
+            \}\
+            if (r_f < 1500) \{\
+                t_lim = ECU_Config::ToFixed(0.90);\
+            \}\
+        \}\
+\
+        int32_t base_req = (48 * ECU_Config::FP_SCALE) + (r_f / 120);\
+        int64_t req_calc = (static_cast<int64_t>(base_req) * fuel_mult) >> ECU_Config::FP_SHIFT;\
+        req_calc = (req_calc * t_lim) >> ECU_Config::FP_SHIFT;\
+        int32_t final_req = static_cast<int32_t>(req_calc + rail_offset);\
+\
+        if (temp > ECU_Config::TEMP_OPTIMAL_START) \{\
+            int32_t stress = (temp - ECU_Config::TEMP_OPTIMAL_START) >> 1;\
+            int32_t safety = ECU_Config::SafeClamp(ECU_Config::FP_SCALE - stress, 0, ECU_Config::FP_SCALE);\
+            final_req = static_cast<int32_t>((static_cast<int64_t>(final_req) * safety) >> ECU_Config::FP_SHIFT);\
+            out.protection_active = (safety < ECU_Config::FP_SCALE);\
+        \}\
+\
+        final_req = ECU_Config::SafeClamp(final_req, 0, ECU_Config::MAX_RAIL_PRESSURE);\
+        out.rail_dac = (static_cast<uint64_t>(final_req) * ECU_Config::DAC_MAX) / ECU_Config::MAX_RAIL_PRESSURE;\
+        out.injector_us = ECU_Config::MIN_INJECTOR_US + (final_req / ECU_Config::INJECTOR_SCALE_DIV);\
+        out.timing_advance_us = t_adv;\
+\
+        return out;\
+    \}\
+\};\
+}

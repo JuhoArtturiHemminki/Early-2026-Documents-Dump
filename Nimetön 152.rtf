@@ -1,0 +1,162 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\froman\fcharset0 Times-Roman;\f1\froman\fcharset0 Times-Bold;\f2\fmodern\fcharset0 Courier;
+}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;}
+{\*\listtable{\list\listtemplateid1\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid1\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid1}
+{\list\listtemplateid2\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid101\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid2}
+{\list\listtemplateid3\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid201\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid3}}
+{\*\listoverridetable{\listoverride\listid1\listoverridecount0\ls1}{\listoverride\listid2\listoverridecount0\ls2}{\listoverride\listid3\listoverridecount0\ls3}}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab720
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 \expnd0\expndtw0\kerning0
+PATENTTIHAKEMUS: SSOD-V10 QUANTUM-RESILIENT DRIVE\
+\pard\pardeftab720\partightenfactor0
+
+\f1\b \cf0 HAKEMUSNUMERO:
+\f0\b0  FI-2024-SSOD-V10-QR-FINAL\
+
+\f1\b KEKSINN\'d6N NIMI:
+\f0\b0  J\'e4rjestelm\'e4 ja menetelm\'e4 ajoneuvon kineettisen synkronoinnin, energianhallinnan ja vikasietoisen operoinnin optimoimiseksi hajautetun reunalaskennan, dynaamisen s\'e4demallinnuksen ja akustisen sensorifuusion avulla.\
+\
+\
+\
+I. TEKNINEN SELITYS JA ARKKITEHTUURI\
+Keksint\'f6 k\'e4sitt\'e4\'e4 kolmitasoisen hallintakerroksen (Edge, Kernel, Guardian), joka mahdollistaa ajoneuvon proaktiivisen hallinnan ennen mekaanisen luiston alkamista.\
+\
+1. Dynaaminen fysiikkamalli (Matemaattinen perusta)\
+J\'e4rjestelm\'e4 laskee renkaan dynaamisen s\'e4teen (R_DYN) reaaliajassa seuraavalla kaavalla:\
+
+\f1\b R_DYN = R_NOMINAL - (Fz / K_TYRE) + (0.000085 * Delta_T * R_NOMINAL)
+\f0\b0 \
+Miss\'e4:\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls1\ilvl0
+\f1\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Fz
+\f0\b0 : Renkaaseen kohdistuva pystysuuntainen kuormitus (N).\
+\ls1\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+K_TYRE
+\f0\b0 : Renkaan pystyj\'e4ykkyys, joka kalibroidaan automaattisesti vertaamalla optista maanopeutta ja kulmanopeutta.\
+\ls1\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Delta_T
+\f0\b0 : Renkaan sis\'e4isen l\'e4mp\'f6tilan muutos vertailukohtaan.\
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+\
+\
+II. OHJELMISTO-IMPLEMENTOINTI (L\'c4HDEKOODI)\
+Koodi suoritetaan ajoneuvon Edge-prosessorilla (esim. ESP-V2) 1000 Hz n\'e4ytteenottotaajuudella.\
+\
+1. Akustinen kitka-analyysi (Edge Layer)\
+\
+cpp\
+\pard\pardeftab720\partightenfactor0
+
+\f2\fs26 \cf0 // SSOD-V10 EDGE: Proaktiivinen kitkantunnistus\
+float get_validated_friction(float* acoustic_buffer, float temp_surface) \{\
+    // 1. FFT-analyysi: Tunnistetaan tienpinnan sormenj\'e4lki (Frequency Fingerprint)\
+    float friction_mu = perform_spectral_fingerprinting(acoustic_buffer);\
+    \
+    // 2. FAIL-SAFE: Signaali-kohinasuhteen (SNR) tarkistus\
+    float snr = calculate_signal_to_noise(acoustic_buffer);\
+    if (snr < 1.8) \{ \
+        return -1.0; // VIRHE: Anturi peittynyt (muta/lumi) tai vaurioitunut\
+    \}\
+\
+    // 3. Termodynaaminen korjaus kitkakertoimeen\
+    float sigma_temp = (temp_surface - 20.0) * 0.002;\
+    return friction_mu - sigma_temp;\
+\}\
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 K\'e4yt\'e4 koodia harkiten.\
+\
+2. Hallintalogiikka ja mikroluisto (Kernel Layer)\
+\
+cpp\
+\pard\pardeftab720\partightenfactor0
+
+\f2\fs26 \cf0 // SSOD-V10 KERNEL: Momentinhallinta ja vikasietoisuus\
+float calculate_safe_torque(PhysicsState ps, SystemStatus status) \{\
+    // Jos Guardian-kerros raportoi virheen, k\'e4ytet\'e4\'e4n konservatiivista arvoa\
+    if (status == DEGRADED) \{\
+        ps.current_mu = 0.4; // Turvallinen oletusarvo liukkaalle\
+    \}\
+\
+    // R_DYN Laskenta (Kuorma + L\'e4mp\'f6laajeneminen)\
+    float R_DYN = R_NOMINAL - (ps.Fz_load / K_TYRE) + (0.000085 * ps.temp_internal * R_NOMINAL);\
+    float w_target = ps.ground_speed / R_DYN;\
+\
+    // LAUNCH & TRACTION CONTROL (Optimoitu 2-3 % mikroluisto)\
+    if (ps.current_mu > 0.8 && status == OPTIMAL) \{\
+        return w_target * 1.03; // Maksimi kiihtyvyys varmuustilassa\
+    \}\
+    return w_target;\
+\}\
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 K\'e4yt\'e4 koodia harkiten.\
+\
+\
+\
+III. FYYSINEN INTEGRAATIO (HARDWARE INTERFACE)\
+J\'e4rjestelm\'e4 kytket\'e4\'e4n ajoneuvon fyysisiin osiin seuraavasti:\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls2\ilvl0
+\f1\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+Anturit (Input):
+\f0\b0  Py\'f6r\'e4nnavan suojakilpeen asennetaan pietsos\'e4hk\'f6iset laajakaista-anturit. Ne kytket\'e4\'e4n 
+\f1\b A/D-muuntimeen
+\f0\b0 , joka sy\'f6tt\'e4\'e4 datan SSOD-prosessorille.\
+\ls2\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+V\'e4yl\'e4kytkent\'e4:
+\f0\b0  J\'e4rjestelm\'e4 lukee ja kirjoittaa suoraan ajoneuvon 
+\f1\b CAN-v\'e4yl\'e4\'e4n
+\f0\b0  tai 
+\f1\b Automotive Ethernetiin
+\f0\b0 , ohittaen viivett\'e4 aiheuttavat vakiosuodattimet.\
+\ls2\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	3	}\expnd0\expndtw0\kerning0
+Invertteri ja Moottori:
+\f0\b0  Koodi l\'e4hett\'e4\'e4 suoria v\'e4\'e4nt\'f6momenttipyynt\'f6j\'e4 s\'e4hk\'f6moottorin invertterille. Mikroluisto-algoritmi pystyy s\'e4\'e4t\'e4m\'e4\'e4n moottorin tehoa millisekunnin tarkkuudella.\
+\ls2\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	4	}\expnd0\expndtw0\kerning0
+Hydrauliyksikk\'f6:
+\f0\b0  Jarrutustilanteessa koodi ohjaa ABS-venttiilien 
+\f1\b PWM-signaaleja
+\f0\b0 , pit\'e4en jarrutuspaineen optimaalisella tasolla ilman perinteisen ABS-j\'e4rjestelm\'e4n "hakkaavaa" liikett\'e4.\
+\ls2\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	5	}\expnd0\expndtw0\kerning0
+Energia (Superkapasitaattorit):
+\f0\b0  J\'e4rjestelm\'e4 kytkee rinnakkaisen superkapasitaattoripankin k\'e4ytt\'f6\'f6n v\'e4litt\'f6m\'e4sti, kun kitka-analyysi vahvistaa negatiivisen kiihtyvyyden tarpeen, mahdollistaen nopean lataussyklin.\
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+\
+\
+IV. PATENTTIVAATIMUKSET (CLAIMS)\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls3\ilvl0
+\f1\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+J\'e4rjestelm\'e4
+\f0\b0 , joka hy\'f6dynt\'e4\'e4 akustista FFT-analyysia tienpinnan kitkakertoimen m\'e4\'e4ritt\'e4miseksi proaktiivisesti, tunnistettuna siit\'e4, ett\'e4 se sis\'e4lt\'e4\'e4 
+\f1\b Guardian-moduulin
+\f0\b0 , joka hylk\'e4\'e4 ep\'e4luotettavan datan SNR-arvon perusteella.\
+\ls3\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+Menetelm\'e4
+\f0\b0  renkaan dynaamisen s\'e4teen laskemiseksi reaaliajassa huomioiden pystykuorman (Fz), pystyj\'e4ykkyyden (K_TYRE) ja l\'e4mp\'f6laajenemisen.\
+\ls3\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	3	}\expnd0\expndtw0\kerning0
+Vikasietoinen ohjauslogiikka
+\f0\b0 , joka siirt\'e4\'e4 ajoneuvon automaattisesti "Deterministic Fallback" -tilaan, mik\'e4li sensorifuusion varmuustaso laskee alle 95 %:n.\
+\ls3\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 {\listtext	4	}\expnd0\expndtw0\kerning0
+Algoritmi
+\f0\b0 , joka optimoi kiihtyvyyden ja jarrutuksen sallimalla hallitun 1\'965 % mikroluiston vain optimaalisissa sensorivarmuuden olosuhteissa.\
+}

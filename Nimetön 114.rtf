@@ -1,0 +1,69 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 # SIGMA-SYNC ORBITAL DRIVE (SSOD) - OHJAUSALGORITMI v1.0\
+# Tekij\'e4: [Sin\'e4]\
+# Kuvaus: Akselien synkronointi ja saumaton vedon siirto\
+\
+class SSOD_Controller:\
+    def __init__(self):\
+        self.active_axle = "A"      # Nykyinen vet\'e4v\'e4 akseli\
+        self.standby_axle = "B"     # Ilmassa oleva akseli\
+        self.target_gear = 1\
+        self.is_shifting = False\
+\
+    def monitor_acceleration(self, current_rpm, velocity_kmh):\
+        # Tarkistetaan, onko aika vaihtaa suuremmalle vaihteelle\
+        if current_rpm > 2200 and not self.is_shifting:\
+            self.prepare_handover(velocity_kmh)\
+\
+    def prepare_handover(self, velocity_kmh):\
+        print(f"VALMISTELLAAN VAIHTOA: \{self.active_axle\} -> \{self.standby_axle\}")\
+        self.is_shifting = True\
+        \
+        # 1. ESIVALINTA: Kytket\'e4\'e4n seuraava vaihde ilmassa olevaan linjaan\
+        self.target_gear += 1\
+        self.engage_gearbox_line(self.standby_axle, self.target_gear)\
+\
+        # 2. E-SYNC: Kiihdytet\'e4\'e4n ilmassa oleva rengas vastaamaan tien nopeutta\
+        # Lasketaan tarvittava RPM renkaan halkaisijan perusteella\
+        required_wheel_rpm = self.calculate_sync_rpm(velocity_kmh)\
+        self.activate_electric_motor(self.standby_axle, required_wheel_rpm)\
+\
+        # 3. ODOTETAAN SYNKRONTIA (Varmistetaan 0 km/h nopeusero)\
+        while not self.is_synchronized(self.standby_axle, velocity_kmh):\
+            continue \
+\
+        self.execute_handover()\
+\
+    def execute_handover(self):\
+        # 4. LASKEUTUMINEN: Lasketaan akseli tiehen\
+        self.deploy_hydraulics(self.standby_axle, pressure="MAX")\
+\
+        # 5. RISTIINKYTKENT\'c4: Momentin siirto (Seamless Transition)\
+        # Suljetaan standby-kytkin ja avataan aktiivinen kytkin samanaikaisesti\
+        self.ramp_clutch(self.standby_axle, start=0, end=100, duration_ms=150)\
+        self.ramp_clutch(self.active_axle, start=100, end=0, duration_ms=150)\
+\
+        # 6. NOSTO JA LATAUS (KERS)\
+        self.lift_axle(self.active_axle)\
+        self.activate_kers_recovery(self.active_axle)\
+\
+        # P\'e4ivitet\'e4\'e4n tilat\
+        self.active_axle, self.standby_axle = self.standby_axle, self.active_axle\
+        self.is_shifting = False\
+        print(f"VAIHTO VALMIS. Aktiivinen veto: \{self.active_axle\}")\
+\
+# --- APUFUNKTIOT PATENTTIA VARTEN ---\
+    def calculate_sync_rpm(self, kmh):\
+        # Laskentakaava renkaan keh\'e4nopeuden ja kulmanopeuden v\'e4lill\'e4\
+        tire_radius = 0.5 # metri\'e4\
+        return (kmh / 3.6) / (2 * 3.14159 * tire_radius) * 60\
+\
+# J\'e4rjestelm\'e4n k\'e4ynnistys\
+ssod = SSOD_Controller()\
+}

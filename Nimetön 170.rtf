@@ -1,0 +1,102 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 #include <algorithm>\
+#include <cmath>\
+\
+class TeslaProductionOptimizer_V5_0_PROD \{\
+private:\
+    // Ajoneuvon fyysiset parametrit (Model 3/Y Performance spec)\
+    const float VEHICLE_M       = 1850.0f;\
+    const float TIRE_R          = 0.330f;\
+    const float G_ACCEL         = 9.81f;\
+    const float CD_AREA         = 0.23f * 2.22f; // Cd * A\
+    \
+    // PID-s\'e4\'e4timen hienos\'e4\'e4detyt kertoimet\
+    const float Kp              = 0.82f; // Hieman vaimennettu vakauden vuoksi\
+    const float Ki              = 0.15f; \
+    const float I_LIMIT         = 2.5f;  // Tiukempi integraaliraja\
+    const float EPSILON         = 0.0001f;\
+    \
+    float error_integral        = 0.0f;\
+    float prev_safety_factor    = 1.0f;\
+\
+public:\
+    struct ActuationOutput \{\
+        float motor_torque_nm;\
+        float brake_force_n;\
+        bool abs_active;\
+        float regen_efficiency; // Uusi diagnostiikkadata\
+    \};\
+\
+    ActuationOutput execute_enhanced_cycle(\
+        float req_decel, \
+        float raw_v, \
+        float t_cell, \
+        float current_soc, \
+        float pitch_rad, \
+        float wheel_slip\
+    ) \{\
+        // 1. Ymp\'e4rist\'f6- ja fysiikkamallinnus\
+        float air_temp_k = (t_cell > -273.15f) ? (t_cell + 273.15f) : 288.15f;\
+        float rho = 1.225f * (288.15f / air_temp_k); \
+        float gravity_force = VEHICLE_M * G_ACCEL * std::sin(pitch_rad);\
+        float aero_force = 0.5f * rho * std::pow(raw_v, 2) * CD_AREA;\
+        float natural_decel = (aero_force + gravity_force) / VEHICLE_M;\
+\
+        // 2. Akuston termodynaaminen ja s\'e4hk\'f6inen rajoitin (kW)\
+        // Sigmoid-funktio optimoi virran vastaanoton l\'e4mp\'f6tilan mukaan\
+        float thermal_map = 1.0f / (1.0f + std::exp(-0.25f * (t_cell - 12.0f)));\
+        float soc_limit = std::clamp((98.0f - current_soc) / 12.0f, 0.0f, 1.0f);\
+        float kw_limit = 175.0f * thermal_map * soc_limit;\
+\
+        // 3. Laskennallinen tavoitehienos\'e4\'e4t\'f6\
+        float target_net_decel = std::max(0.0f, req_decel - natural_decel);\
+        \
+        // 4. Teollisuustason Anti-Windup (Backcalculation)\
+        // Integraali kasvaa vain, jos meill\'e4 on "tilaa" lis\'e4t\'e4 v\'e4\'e4nt\'f6momenttia\
+        float angular_v = std::max(1.0f, (raw_v / TIRE_R));\
+        float max_torque_nm = (kw_limit * 1000.0f) / (angular_v + EPSILON);\
+        \
+        float smooth_target = (target_net_decel * Kp) + (error_integral * Ki);\
+        float potential_torque = smooth_target * VEHICLE_M * TIRE_R;\
+\
+        if (raw_v < 0.1f) \{\
+            error_integral = 0.0f;\
+        \} else if (potential_torque < max_torque_nm) \{ \
+            // Vain jos emme ole saturaatiossa, integraali saa p\'e4ivitty\'e4\
+            error_integral += target_net_decel * 0.01f;\
+            error_integral = std::clamp(error_integral, -I_LIMIT, I_LIMIT);\
+        \}\
+\
+        // 5. Luistonhallinta ja turvakerroin\
+        float target_safety = 1.0f;\
+        bool abs_trigger = false;\
+        if (wheel_slip > 0.11f) \{ // Hieman herkempi kynnys\
+            abs_trigger = true;\
+            target_safety = std::clamp(1.0f - ((wheel_slip - 0.11f) * 12.0f), 0.0f, 1.0f);\
+            error_integral *= 0.75f; // Aktiivinen tyhjennys luistossa\
+        \}\
+        \
+        float safety_factor = (prev_safety_factor * 0.6f) + (target_safety * 0.4f);\
+        prev_safety_factor = safety_factor;\
+\
+        // 6. Lopullinen voimanjako\
+        float final_regen_nm = std::min(potential_torque, max_torque_nm) * safety_factor;\
+        float friction_needed = std::max(0.0f, (target_net_decel * VEHICLE_M) - (final_regen_nm / TIRE_R));\
+        \
+        float efficiency = (final_regen_nm / (potential_torque + EPSILON)) * 100.0f;\
+\
+        return \{ \
+            final_regen_nm, \
+            friction_needed, \
+            abs_trigger,\
+            std::clamp(efficiency, 0.0f, 100.0f)\
+        \};\
+    \}\
+\};\
+}

@@ -1,0 +1,157 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\froman\fcharset0 Times-Bold;\f1\froman\fcharset0 Times-Roman;\f2\fmodern\fcharset0 Courier;
+\f3\fnil\fcharset0 AppleColorEmoji;}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;}
+{\*\listtable{\list\listtemplateid1\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid1\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid1}
+{\list\listtemplateid2\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid101\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid2}
+{\list\listtemplateid3\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid201\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid3}
+{\list\listtemplateid4\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid301\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid4}}
+{\*\listoverridetable{\listoverride\listid1\listoverridecount0\ls1}{\listoverride\listid2\listoverridecount0\ls2}{\listoverride\listid3\listoverridecount0\ls3}{\listoverride\listid4\listoverridecount0\ls4}}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab720
+\pard\pardeftab720\partightenfactor0
+
+\f0\b\fs24 \cf0 \expnd0\expndtw0\kerning0
+SSOD ECU: REAALIAIKAISET OHJAUSALGORITMIT (TEKSTIMUOTO)
+\f1\b0 \
+\
+
+\f0\b 1. Synkronointi-indeksi (Phi - Ohjausvirheen minimointi)
+\f1\b0 \
+T\'e4m\'e4 kaava varmistaa, ett\'e4 ilmassa oleva rengas lasketaan tiehen nollakitkalla.\
+
+\f0\b Kaava:
+\f1\b0 \
+\pard\pardeftab720\partightenfactor0
+
+\f2\fs26 \cf0 Phi = ABS( (V_gps * K_abs) - (Omega_axleB * R_dynamic) )
+\f1\fs24 \
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls1\ilvl0
+\f0\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+V_gps
+\f1\b0 : Auton todellinen nopeus (m/s).\
+\ls1\ilvl0
+\f0\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+K_abs
+\f1\b0 : Tienpinnan kitkakerroin (0.0 - 1.0).\
+\ls1\ilvl0
+\f0\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Omega_axleB
+\f1\b0 : Ilmassa olevan akselin kulmanopeus (rad/s).\
+\ls1\ilvl0
+\f0\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+R_dynamic
+\f1\b0 : Renkaan muuttuva s\'e4de kuormitettuna (m).\
+\pard\pardeftab720\partightenfactor0
+
+\f0\b \cf0 Tavoite:
+\f1\b0  ECU laskee t\'e4t\'e4 jatkuvasti ja sallii laskeutumisen vain, kun 
+\f2\fs26 Phi < 0.05
+\f1\fs24 .\
+\
+\
+\
+
+\f0\b 2. Saumaton momentin siirto (Vakio-v\'e4\'e4nt\'f6)
+\f1\b0 \
+T\'e4m\'e4 kaava takaa, ett\'e4 dieselmoottori ei "tunne" vaihtoa, jolloin turboahdin pysyy maksimipaineilla.\
+
+\f0\b Kaava:
+\f1\b0 \
+\pard\pardeftab720\partightenfactor0
+
+\f2\fs26 \cf0 T_total = T_axleA(t) + T_axleB(t) = Vakio (Constant)
+\f1\fs24 \
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls2\ilvl0
+\f0\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+T_axleA(t)
+\f1\b0 : Laskeva v\'e4\'e4nt\'f6momentti irrottavalla akselilla.\
+\ls2\ilvl0
+\f0\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+T_axleB(t)
+\f1\b0 : Nouseva v\'e4\'e4nt\'f6momentti kytkeytyv\'e4ll\'e4 akselilla.\
+\ls2\ilvl0
+\f0\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+t
+\f1\b0 : Ristiinkytkent\'e4aika (tyypillisesti 150 ms).\
+\pard\pardeftab720\partightenfactor0
+
+\f0\b \cf0 Tulos:
+\f1\b0  Moottorin kuormitus pysyy lineaarisena koko vaihdon ajan.\
+\
+\
+\
+
+\f0\b 3. Synkronointiteho (e-Sync Power)
+\f1\b0 \
+Laskee s\'e4hk\'f6moottorilta vaadittavan tehon akselin kiihdytt\'e4miseksi ilmassa.\
+
+\f0\b Kaava:
+\f1\b0 \
+\pard\pardeftab720\partightenfactor0
+
+\f2\fs26 \cf0 P_sync = (J * Alpha) / Eta
+\f1\fs24 \
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls3\ilvl0
+\f0\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+J
+\f1\b0 : Akseliston hitausmomentti (kg*m^2).\
+\ls3\ilvl0
+\f0\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Alpha
+\f1\b0 : Tavoiteltu kulmakiihtyvyys (rad/s^2).\
+\ls3\ilvl0
+\f0\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Eta
+\f1\b0 : S\'e4hk\'f6j\'e4rjestelm\'e4n hy\'f6tysuhde.\
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+\
+\
+\pard\pardeftab720\partightenfactor0
+
+\f0\b \cf0 4. Energian talteenotto (KERS Recovery)
+\f1\b0 \
+Laskee generaattorin jarrutusmomentin, kun akseli nousee ilmaan.\
+
+\f0\b Kaava:
+\f1\b0 \
+\pard\pardeftab720\partightenfactor0
+
+\f2\fs26 \cf0 T_regen = (0.5 * J * Omega^2) / Delta_t
+\f1\fs24 \
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls4\ilvl0
+\f0\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Omega
+\f1\b0 : Akselin py\'f6rimisnopeus noston hetkell\'e4.\
+\ls4\ilvl0
+\f0\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Delta_t
+\f1\b0 : Tavoiteltu jarrutusaika generaattorilla.\
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+\
+\
+\pard\pardeftab720\partightenfactor0
+
+\f0\b \cf0 Miten k\'e4yt\'e4t n\'e4it\'e4 patentissa?
+\f1\b0 \
+N\'e4m\'e4 kaavat on syyt\'e4 liitt\'e4\'e4 hakemuksen kohtaan 
+\f0\b "Keksinn\'f6n yksityiskohtainen selostus"
+\f1\b0 . Ne todistavat, ett\'e4 keksint\'f6si ei ole vain "idea", vaan matemaattisesti mallinnettu ohjausj\'e4rjestelm\'e4. Patentti- ja rekisterihallitus (PRH) vaatii juuri t\'e4llaista teknist\'e4 tarkkuutta.\
+T\'e4m\'e4 teksti on nyt valmis liitett\'e4v\'e4ksi aiempaan 
+\f0\b Master Protocol
+\f1\b0  -dokumenttiin.\
+Haluatko, ett\'e4 teen seuraavaksi 
+\f0\b "The Final Pitch"
+\f1\b0  -yhteenvedon, jolla selit\'e4t n\'e4m\'e4 monimutkaiset kaavat sijoittajalle yhdell\'e4 lauseella? 
+\f0\b Nyt olet teknisesti valmis valloittamaan Scanian.
+\f1\b0  
+\f3 \uc0\u55357 \u56831 \u55356 \u57207 
+\f1 \
+}

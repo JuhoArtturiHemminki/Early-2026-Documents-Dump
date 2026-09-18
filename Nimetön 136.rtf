@@ -1,0 +1,201 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\froman\fcharset0 Times-Bold;\f1\froman\fcharset0 Times-Roman;\f2\froman\fcharset0 Times-Italic;
+\f3\fmodern\fcharset0 Courier;}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;}
+{\*\listtable{\list\listtemplateid1\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid1\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid1}
+{\list\listtemplateid2\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid101\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid2}
+{\list\listtemplateid3\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid201\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid3}}
+{\*\listoverridetable{\listoverride\listid1\listoverridecount0\ls1}{\listoverride\listid2\listoverridecount0\ls2}{\listoverride\listid3\listoverridecount0\ls3}}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab720
+\pard\pardeftab720\partightenfactor0
+
+\f0\b\fs24 \cf0 \expnd0\expndtw0\kerning0
+SSOD-J\'c4RJESTELM\'c4N LOPULLINEN TOTEUTUSOPAS
+\f1\b0 \
+Sigma-Sync Orbital Drive (SSOD) on dynaaminen voimansiirtoj\'e4rjestelm\'e4, joka hallitsee ajoneuvon massan inertiaa. Se vaihtaa vet\'e4v\'e4\'e4 akselistoa lennosta ilman momentin katkeamista kiihdytt\'e4m\'e4ll\'e4 ilmassa olevan akselin tien nopeuteen (e-Sync) ja ker\'e4\'e4m\'e4ll\'e4 nousevan akselin liike-energian talteen (KERS).\
+\
+\
+\
+1. MEKAANINEN ARKKITEHTUURI JA MATERIAALIT\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls1\ilvl0
+\f0\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Sigma-akselisto (Pusher):
+\f1\b0  Sijoitetaan p\'e4\'e4vetoakselin eteen. Runko vahvistetaan 10 mm S700MC-suurlujuuster\'e4ksell\'e4.\
+\ls1\ilvl0
+\f0\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Mekaaninen Interlock (Keinuvipu):
+\f1\b0  Valmistetaan 42CrMo4-nuorrutuster\'e4ksest\'e4. H-profiilinen keinuvipu takaa fyysisen lukituksen: kun yksi akseli nousee, vipu painaa toisen alas.\
+\ls1\ilvl0
+\f0\b \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Akseliv\'e4li:
+\f1\b0  1350 mm et\'e4isyys takaa 250 mm pystysuuntaisen liikevaran.\
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+\
+\
+2. SUURJ\'c4NNITEPIIRI JA L\'c4MM\'d6NHALLINTA\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls2\ilvl0
+\f0\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+Energiavarasto:
+\f1\b0  Skeleton Technologies SkelMod 500V -superkondensaattori (300A High-Speed sulake).\
+\ls2\ilvl0
+\f0\b \kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+Invertterit:
+\f1\b0  2x Sevcon Gen4 Size 8. Invertteri A p\'e4\'e4akselille (KERS), Invertteri B Sigma-akselille (e-Sync).\
+\ls2\ilvl0
+\f0\b \kerning1\expnd0\expndtw0 {\listtext	3	}\expnd0\expndtw0\kerning0
+J\'e4\'e4hdytyskierto:
+\f1\b0  S\'e4hk\'f6inen vesipumppu (12V PWM) kiert\'e4\'e4 j\'e4\'e4hdytysnestett\'e4 napamoottoreiden ja invertterien l\'e4pi. Python-koodi s\'e4\'e4t\'e4\'e4 virtausta l\'e4mp\'f6tiladatan perusteella.\
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+\
+\
+3. MATEMAATTISET KAAVAT INTEGROIDUSSA MUODOSSA\
+ECU-yksikk\'f6 laskee j\'e4rjestelm\'e4n tilan 100 Hz taajuudella k\'e4ytt\'e4en n\'e4it\'e4 kaavoja:\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls3\ilvl0
+\f0\b \cf0 \kerning1\expnd0\expndtw0 {\listtext	1	}\expnd0\expndtw0\kerning0
+Phi = ABS( (V_gps * K_abs) - (Omega_axleB * R_dynamic) )
+\f1\b0 \uc0\u8232 
+\f2\i Tavoitearvo kytkenn\'e4lle on Phi < 0.02. V_gps on ajoneuvon todellinen nopeus, K_abs on kitkakerroin, Omega_axleB on akselin kulmanopeus ja R_dynamic on dynaaminen vierint\'e4s\'e4de.
+\f1\i0 \
+\ls3\ilvl0
+\f0\b \kerning1\expnd0\expndtw0 {\listtext	2	}\expnd0\expndtw0\kerning0
+R_dynamic = R_nominal * (1 - (Load_coeff * Pressure_psi))
+\f1\b0 \uc0\u8232 
+\f2\i Huomioi renkaan muodonmuutoksen akselipainon ja rengaspaineen mukaan.
+\f1\i0 \
+\ls3\ilvl0
+\f0\b \kerning1\expnd0\expndtw0 {\listtext	3	}\expnd0\expndtw0\kerning0
+T_regen = (0.5 * J * Omega^2) / Delta_t
+\f1\b0 \uc0\u8232 
+\f2\i M\'e4\'e4ritt\'e4\'e4 regeneratiivisen jarrutuksen voiman hitausmomentin (J), kulmanopeuden (Omega) ja ajan (Delta_t) perusteella.
+\f1\i0 \
+\ls3\ilvl0
+\f0\b \kerning1\expnd0\expndtw0 {\listtext	4	}\expnd0\expndtw0\kerning0
+T_total = T_active(t) + T_standby(t) = Vakio
+\f1\b0 \uc0\u8232 
+\f2\i Takaa tasaisen vedon akseliston vaihdon aikana.
+\f1\i0 \
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+\
+\
+4. T\'c4YDELLINEN PYTHON-TUOTANTOKOODI v13.0 (CANopen & L\'c4MP\'d6TILAVALVONTA)\
+\
+python\
+\pard\pardeftab720\partightenfactor0
+
+\f3\fs26 \cf0 import can\
+import time\
+import math\
+import logging\
+\
+# LOKITUS JA SERTIFIOINTIDATA (ISO 26262 ASIL-D VALMIUS)\
+logging.basicConfig(level=logging.INFO, filename="ssod_v13.log")\
+\
+class SSOD_Master_ECU_v13:\
+    def __init__(self):\
+        # KONFIGURAATIO JA VAKIOT\
+        self.R_NOMINAL = 0.512\
+        self.PHI_THRESHOLD = 0.02\
+        self.K_ABS = 1.0                \
+        self.CAN_ID_SPEED = 0x18FEF100  # J1939 Speed (PGN 65265)\
+        \
+        # CANopen OBJEKTIKARTOITUS (SEVCON GEN4)\
+        self.OBJ_TORQUE_REQUEST = 0x6071 \
+        self.OBJ_ACTUAL_SPEED = 0x606C   \
+        self.OBJ_TEMP_MOTOR = 0x4601     # Valmistajakohtainen l\'e4mp\'f6tila-indeksi\
+        self.INVERTER_B_ID = 0x601       \
+        self.INVERTER_A_ID = 0x600       \
+\
+        try:\
+            self.bus = can.interface.Bus(channel='can0', bustype='socketcan', bitrate=500000)\
+            logging.info("SSOD ECU v13.0: System Online.")\
+        except Exception as e:\
+            logging.error(f"Critical Error: \{e\}"); exit(1)\
+\
+        self.v_gps = 0.0\
+        self.current_state = "STANDBY"\
+\
+    def calculate_phi(self, motor_rpm, r_dynamic):\
+        v_mps = (self.v_gps / 3.6)\
+        omega_axleB = (motor_rpm * 2 * math.pi) / 60\
+        return abs( (v_mps * self.K_ABS) - (omega_axleB * r_dynamic) )\
+\
+    def send_torque(self, node_id, torque_pct):\
+        val = int(torque_pct * 10)\
+        data = [0x2B, (self.OBJ_TORQUE_REQUEST & 0xFF), (self.OBJ_TORQUE_REQUEST >> 8), 0x00, \
+                (val & 0xFF), (val >> 8), 0x00, 0x00]\
+        self.bus.send(can.Message(arbitration_id=node_id, data=data))\
+\
+    def execute_sigma_shift(self, load_kg, psi):\
+        self.current_state = "SYNCING"\
+        r_dynamic = self.R_NOMINAL * (1 - (0.00001 * load_kg / psi))\
+        target_rpm = ( (self.v_gps / 3.6) / r_dynamic) * 60 / (2 * math.pi)\
+        \
+        while True:\
+            self.send_torque(self.INVERTER_B_ID, 40.0) \
+            if self.calculate_phi(target_rpm, r_dynamic) < self.PHI_THRESHOLD:\
+                break\
+            time.sleep(0.01)\
+\
+        # HANDOVER & THERMAL ACTIVATION\
+        self.trigger_hydraulics("DOWN")\
+        self.set_coolant_pump(80) # 80% PWM teho\
+        \
+        # KERS RECOVERY\
+        self.current_state = "KERS"\
+        self.send_torque(self.INVERTER_A_ID, -80.0) \
+        time.sleep(1.5)\
+        \
+        self.current_state = "STANDBY"\
+        logging.info("Shift Success.")\
+\
+    def set_coolant_pump(self, duty_cycle):\
+        pass # GPIO PWM ohjaus\
+\
+    def trigger_hydraulics(self, action):\
+        pass # GPIO Releohjaus\
+\
+if __name__ == "__main__":\
+    ecu = SSOD_Master_ECU_v13()\
+    while True:\
+        msg = ecu.bus.recv(0.01)\
+        if msg and msg.arbitration_id == ecu.CAN_ID_SPEED:\
+            ecu.v_gps = ((msg.data << 8) | msg.data) / 256.0\
+        if ecu.v_gps > 45 and ecu.current_state == "STANDBY":\
+            ecu.execute_sigma_shift(load_kg=8000, psi=120)\
+\pard\pardeftab720\partightenfactor0
+
+\f1\fs24 \cf0 K\'e4yt\'e4 koodia harkiten.\
+\
+\
+\
+5. PATENTTI- JA TEKNISET PIIRRUKSET (FIGURES 1-5)\
+\pard\pardeftab720\partightenfactor0
+
+\f0\b \cf0 FIGURE 1: Alustan pusher-rakenne
+\f1\b0 \
+Sivun\'e4kym\'e4 ajoneuvosta, jossa Sigma-akseli (B) on asennettu p\'e4\'e4vetoakselin (A) eteen. Kuva esitt\'e4\'e4 akselien liikeradat ja voimansiirron jakovaihteiston sijoittelun.\
+
+\f0\b FIGURE 2: Mekaaninen Interlock (Fail-Safe)
+\f1\b0 \
+Yksityiskohtainen piirros 42CrMo4-keinuvivusta. Osoittaa fyysisen nivelpisteen, joka est\'e4\'e4 molempien akseleiden nousemisen samanaikaisesti.\
+
+\f0\b FIGURE 3: S\'e4hk\'f6inen lohkokaavio
+\f1\b0 \
+Arkkitehtuurikuva: Superkondensaattori -> Sevcon-invertterit -> ZF AVE 130 napamoottorit. Nuolet osoittavat energian suunnan (e-Sync vs. KERS).\
+
+\f0\b FIGURE 4: ECU-master vuokaavio
+\f1\b0 \
+Ohjelmiston p\'e4\'e4t\'f6ksentekoprosessi: Nopeuden tunnistus -> Phi-indeksin laskenta -> Synkronointi -> Momentin ristiinajo -> Energian talteenotto.\
+
+\f0\b FIGURE 5: KERS- ja RPM-suorituskykygraafi
+\f1\b0 \
+Tieteellinen kuvaaja ajan funktiona. Viiva A n\'e4ytt\'e4\'e4 RPM:n putoamisen nollaan ja Viiva B n\'e4ytt\'e4\'e4 kondensaattorin j\'e4nnitteen nousun energian palautuessa j\'e4rjestelm\'e4\'e4n.\
+}

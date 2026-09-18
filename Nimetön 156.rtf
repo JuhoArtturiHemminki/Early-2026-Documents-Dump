@@ -1,0 +1,87 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 #include <algorithm>\
+#include <cmath>\
+\
+/**\
+ * TeslaGodMode v1.1 - SAFE RELEASE\
+ * Optimoitu suorituskyky Teslan virallisten l\'e4mp\'f6rajojen (90\'b0C) sis\'e4ll\'e4.\
+ * Lis\'e4\'e4 kiihtyvyytt\'e4 ja mekaanista kestoa ilman lis\'e4rasitusta raudalle.\
+ */\
+class TeslaSafeGodMode \{\
+private:\
+    const float R = 0.330f, MASS = 1850.0f, L = 2.875f, H_CG = 0.460f;\
+    const float CD = 0.23f, AREA = 2.22f, RHO = 1.225f;\
+\
+    float last_v = 0.0f;\
+    float mu_smooth = 1.0f;\
+    float last_t_f = 0.0f, last_t_r = 0.0f;\
+\
+    // GEAR-LASH GUARD: Suojaa vetoakseleita v\'e4lyksen aiheuttamilta iskuilta.\
+    // T\'e4m\'e4 osa koodia pident\'e4\'e4 mekaanisten osien ik\'e4\'e4 verrattuna vakio-ohjelmistoon.\
+    float apply_gear_lash_guard(float target, float last) \{\
+        if ((last <= 0.0f && target > 0.0f) || (last >= 0.0f && target < 0.0f)) \{\
+            return std::clamp(target, last - 40.0f, last + 40.0f); \
+        \}\
+        return target;\
+    \}\
+\
+public:\
+    struct Output \{ float f_torque; float r_torque; float mu_est; \};\
+\
+    Output update(float pedal, float v_ms, float w_f, float w_r, float soc, float temp) \{\
+        \
+        // 1. AERO-COMPENSATION (Kiihtyvyyden yll\'e4pito suurissa nopeuksissa)\
+        float drag_f = 0.5f * RHO * std::pow(v_ms, 2) * CD * AREA;\
+        float aero_pitch_shift = (drag_f * 0.6f) / L;\
+\
+        // 2. GRIP OBSERVER (Reaaliaikainen tienpinnan analyysi)\
+        float actual_a = (v_ms - last_v) / 0.001f;\
+        last_v = v_ms;\
+        if (actual_a < (mu_smooth * 9.81f) * 0.9f && v_ms > 1.5f) mu_smooth -= 0.01f;\
+        else if (mu_smooth < 1.20f) mu_smooth += 0.003f;\
+\
+        // 3. PRE-TENSIONING (V\'e4lit\'f6n vaste ilman mekaanista pauketta)\
+        float pre_tension = (v_ms < 0.05f && pedal > 0.1f) ? 20.0f : 0.0f;\
+\
+        // 4. WEIGHT TRANSFER (Tarkka painonsiirto pystykuorman mukaan)\
+        float ax_target = std::min(11.0f, (pedal * 12.0f)); \
+        float transfer = (H_CG / L) * MASS * ax_target;\
+        \
+        float n_f = (MASS * 9.81f * 0.48f) - transfer - aero_pitch_shift;\
+        float n_r = (MASS * 9.81f * 0.52f) + transfer + aero_pitch_shift;\
+\
+        // 5. THERMAL SAFE LIMIT (Teslan virallinen 90\'b0C raja)\
+        // Koodi alkaa rajoittaa tehoa 85\'b0C kohdalla ja leikkaa sen 90\'b0C kohdalla,\
+        // mik\'e4 takaa moottorin t\'e4yden elini\'e4n.\
+        float thermal_scale = 1.0f;\
+        if (temp > 85.0f) \{\
+            thermal_scale = std::max(0.5f, 1.0f - (temp - 85.0f) * 0.1f);\
+        \}\
+\
+        // 6. TEHON HALLINTA (Akun suojelu)\
+        float omega = std::max(1.0f, v_ms / R);\
+        float p_limit = (soc > 20.0f) ? 450.0f : 300.0f; // kW\
+        float avail_t = (p_limit * 1000.0f) / omega;\
+\
+        // 7. V\'c4\'c4NT\'d6JAKO JA ULOSTULO\
+        float t_grip_f = std::max(0.0f, n_f * mu_smooth * R);\
+        float t_grip_r = std::max(0.0f, n_r * mu_smooth * R);\
+\
+        float raw_f = std::min(\{t_grip_f, avail_t * 0.45f, 650.0f\}) * pedal * thermal_scale;\
+        float raw_r = std::min(\{t_grip_r, avail_t * 0.85f, 850.0f\}) * pedal * thermal_scale;\
+\
+        float final_f = apply_gear_lash_guard(raw_f, last_t_f) + pre_tension;\
+        float final_r = apply_gear_lash_guard(raw_r, last_t_r) - pre_tension;\
+\
+        last_t_f = final_f; last_t_r = final_r;\
+\
+        return \{ final_f, final_r, mu_smooth \};\
+    \}\
+\};\
+}

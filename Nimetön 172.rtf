@@ -1,0 +1,103 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 #include <algorithm>\
+#include <cmath>\
+\
+class TeslaProductionOptimizer_V6_0_ULTRA \{\
+private:\
+    const float VEHICLE_M       = 1850.0f;\
+    const float TIRE_R          = 0.330f;\
+    const float G_ACCEL         = 9.81f;\
+    const float CD_AREA         = 0.23f * 2.22f;\
+    \
+    const float Kp              = 0.80f; \
+    const float Ki              = 0.14f; \
+    const float I_LIMIT         = 2.2f;\
+    const float SLEW_RATE_MAX   = 4500.0f; // Nm/s (est\'e4\'e4 kuminauha-efektin)\
+    const float EPSILON         = 0.0001f;\
+    \
+    float error_integral        = 0.0f;\
+    float prev_safety_factor    = 1.0f;\
+    float last_regen_nm         = 0.0f;\
+    float dt                    = 0.01f; // 100Hz sykli\
+\
+public:\
+    struct ActuationOutput \{\
+        float motor_torque_nm;\
+        float brake_force_n;\
+        bool abs_active;\
+        bool system_fault;\
+    \};\
+\
+    ActuationOutput execute_enhanced_cycle(\
+        float req_decel, \
+        float raw_v, \
+        float t_cell, \
+        float current_soc, \
+        float pitch_rad, \
+        float wheel_slip\
+    ) \{\
+        // 1. Watchdog-suojaus (Input Validation)\
+        if (std::isnan(raw_v) || std::isnan(req_decel) || raw_v < -1.0f || current_soc > 100.1f) \{\
+            error_integral = 0.0f;\
+            return \{ 0.0f, req_decel * VEHICLE_M, false, true \};\
+        \}\
+\
+        // 2. Fysiikka- ja ymp\'e4rist\'f6mallinnus\
+        float air_temp_k = std::clamp(t_cell + 273.15f, 233.15f, 323.15f);\
+        float rho = 1.225f * (288.15f / air_temp_k); \
+        float gravity_force = VEHICLE_M * G_ACCEL * std::sin(pitch_rad);\
+        float aero_force = 0.5f * rho * std::pow(std::max(0.0f, raw_v), 2) * CD_AREA;\
+        float natural_decel = (aero_force + gravity_force) / VEHICLE_M;\
+\
+        // 3. Termodynaaminen kW-rajoitus\
+        float thermal_map = 1.0f / (1.0f + std::exp(-0.28f * (t_cell - 10.0f)));\
+        float soc_limit = std::pow(std::clamp((100.0f - current_soc) / 15.0f, 0.0f, 1.0f), 1.2f);\
+        float kw_limit = 180.0f * thermal_map * soc_limit;\
+\
+        // 4. Laskennallinen tavoite ja Backcalculation Anti-Windup\
+        float target_net_decel = std::max(0.0f, req_decel - natural_decel);\
+        float angular_v = std::max(0.5f, (raw_v / TIRE_R));\
+        float max_torque_nm = (kw_limit * 1000.0f) / (angular_v + EPSILON);\
+        \
+        float smooth_target = (target_net_decel * Kp) + (error_integral * Ki);\
+        float potential_torque = smooth_target * VEHICLE_M * TIRE_R;\
+\
+        if (raw_v < 0.05f) \{\
+            error_integral = 0.0f;\
+        \} else if (potential_torque < max_torque_nm) \{ \
+            error_integral += target_net_decel * dt;\
+            error_integral = std::clamp(error_integral, -I_LIMIT, I_LIMIT);\
+        \}\
+\
+        // 5. Asymmetrinen luistonhallinta\
+        float target_safety = 1.0f;\
+        bool abs_trigger = false;\
+        if (wheel_slip > 0.10f) \{ \
+            abs_trigger = true;\
+            target_safety = std::max(0.0f, 1.0f - ((wheel_slip - 0.10f) * 15.0f));\
+            error_integral *= 0.5f; // Nopea integraalin nollaus turvallisuuden vuoksi\
+        \}\
+        \
+        // Hitaampi palautuminen (Asymmetric Recovery) vakauden takaamiseksi\
+        float filter_coeff = (target_safety < prev_safety_factor) ? 0.8f : 0.2f;\
+        float safety_factor = (prev_safety_factor * (1.0f - filter_coeff)) + (target_safety * filter_coeff);\
+        prev_safety_factor = safety_factor;\
+\
+        // 6. Slew Rate Limiting (Nyk\'e4yksen hallinta)\
+        float desired_regen = std::min(potential_torque, max_torque_nm) * safety_factor;\
+        float max_change = SLEW_RATE_MAX * dt;\
+        float final_regen_nm = std::clamp(desired_regen, last_regen_nm - max_change, last_regen_nm + max_change);\
+        \
+        last_regen_nm = final_regen_nm;\
+        float friction_needed = std::max(0.0f, (target_net_decel * VEHICLE_M) - (final_regen_nm / TIRE_R));\
+\
+        return \{ final_regen_nm, friction_needed, abs_trigger, false \};\
+    \}\
+\};\
+}

@@ -1,0 +1,143 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2639
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\froman\fcharset0 Times-Roman;\f1\froman\fcharset0 Times-Bold;\f2\fmodern\fcharset0 Courier;
+}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;}
+{\*\listtable{\list\listtemplateid1\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{disc\}}{\leveltext\leveltemplateid1\'01\uc0\u8226 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid1}}
+{\*\listoverridetable{\listoverride\listid1\listoverridecount0\ls1}}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab720
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 \expnd0\expndtw0\kerning0
+PATENTTIHAKEMUS: SSOD-V9.0 DUAL-CORE (INTEGRATED KERNEL EDITION)\
+\pard\pardeftab720\partightenfactor0
+
+\f1\b \cf0 KEKSINN\'d6N NIMI:
+\f0\b0  Menetelm\'e4 ja j\'e4rjestelm\'e4 ajoneuvon kineettisen synkronoinnin ja energianhallinnan optimoimiseksi hajautetun reunalaskennan ja dynaamisen s\'e4demallinnuksen avulla.\
+\
+I. TEKNINEN SELITYS JA ARKITEHTUURI\
+T\'e4m\'e4 keksint\'f6 k\'e4sitt\'e4\'e4 kaksi kriittist\'e4 kerrosta: 
+\f1\b Firmware-kerroksen (Edge)
+\f0\b0 , joka k\'e4sittelee fysiologisen datan, ja 
+\f1\b Kernel-kerroksen (Core)
+\f0\b0 , joka suorittaa strategisen hallinnan.\
+\
+1. Reunalaskenta-algoritmi (HUB-Eye Firmware)\
+T\'e4m\'e4 koodi ajetaan jokaisessa py\'f6r\'e4n navassa sijaitsevassa mikrokontrollerissa. Se muuntaa akustisen signaalin kitkakertoimeksi (MU_ESTIMATE).\
+\
+cpp\
+\pard\pardeftab720\partightenfactor0
+
+\f2\fs26 \cf0 // HUB-EYE EDGE SIGNAL PROCESSOR (ESP-V1)\
+// Tavoite: Laskea pitoindeksi ennen v\'e4yl\'e4siirtoa\
+\
+float calculate_friction_index(float* acoustic_buffer, float temp_surface) \{\
+    // Suoritetaan FFT-analyysi (Fast Fourier Transform)\
+    float delta_freq = perform_FFT(acoustic_buffer);\
+    \
+    // Tunnistetaan pinnan tyyppi (Spectral Fingerprinting)\
+    float friction_mu = 1.0; // Oletus: Kuiva asfaltti\
+    \
+    if (delta_freq > 4000.0 && delta_freq < 6000.0) \{\
+        friction_mu = 0.3; // Vesiliirron riski havaittu (Aqua-planing)\
+    \} else if (delta_freq < 500.0) \{\
+        friction_mu = 0.15; // J\'e4\'e4 tai eritt\'e4in liukas pinta (Icy conditions)\
+    \}\
+    \
+    // L\'e4mp\'f6tilakorjaus (Arhenius-tyyppinen sovitus)\
+    float sigma_temp_correction = (temp_surface - 20.0) * 0.002;\
+    return friction_mu - sigma_temp_correction;\
+\}\
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 K\'e4yt\'e4 koodia harkiten.\
+\
+2. Dynaamisen s\'e4teen ja v\'e4\'e4nt\'f6momentin laskenta (Main Kernel)\
+T\'e4m\'e4 koodi ajetaan auton keskusyksik\'f6ss\'e4 (ECU). Se hy\'f6dynt\'e4\'e4 edell\'e4 laskettua kitkakerrointa ja fyysisi\'e4 muuttujia.\
+\
+cpp\
+\pard\pardeftab720\partightenfactor0
+
+\f2\fs26 \cf0 // SSOD-V9 MAIN STRATEGY KERNEL\
+// Laskee optimaalisen py\'f6rimisnopeuden (W_TARGET)\
+\
+struct PhysicsState \{\
+    float Fz_load;        // Pystysuora kuorma (N)\
+    float temp_internal;  // Renkaan sis\'e4l\'e4mp\'f6 (C)\
+    float ground_speed;   // Todellinen maanopeus (m/s)\
+    float current_mu;     // Edgen laskema kitkakerroin\
+\};\
+\
+float get_optimized_torque(PhysicsState ps) \{\
+    const float R_NOMINAL = 0.315;\
+    const float K_TYRE = 225000.0; // Renkaan pystyj\'e4ykkyys\
+    \
+    // Lasketaan DELTA_R (renkaan painuma kuorman alla)\
+    float delta_r_load = ps.Fz_load / K_TYRE;\
+    \
+    // Lasketaan SIGMA_THERM (l\'e4mp\'f6laajeneminen)\
+    float sigma_therm = 0.000085 * ps.temp_internal * R_NOMINAL;\
+    \
+    // LOPULLINEN DYNAAMINEN S\'c4DE (R_DYN)\
+    float R_DYN = R_NOMINAL - delta_r_load + sigma_therm;\
+    \
+    // Lasketaan tavoitepy\'f6rimisnopeus (W_TARGET)\
+    float w_target = ps.ground_speed / R_DYN;\
+    \
+    // LAUNCH CONTROL: Salli mikroluisto kiihtyvyyden maksimoimiseksi\
+    if (ps.current_mu > 0.8) \{\
+        w_target = w_target * 1.02; // 2% optimaalinen luisto (slip)\
+    \}\
+    \
+    return w_target;\
+\}\
+\pard\pardeftab720\partightenfactor0
+
+\f0\fs24 \cf0 K\'e4yt\'e4 koodia harkiten.\
+\
+II. PATENTTIVAATIMUKSET (CLAIMS) \'96 YKSITYISKOHTAINEN LISTA\
+\pard\pardeftab720\partightenfactor0
+
+\f1\b \cf0 Vaatimus 1:
+\f0\b0  J\'e4rjestelm\'e4 ajoneuvon hallintaan, joka sis\'e4lt\'e4\'e4 sensoriyksik\'f6n (Moduuli 2A), joka on varustettu suorittimella, joka suorittaa 
+\f1\b akustisen spektrianalyysin (FFT)
+\f0\b0  tienpinnan kitkakertoimen (MU) m\'e4\'e4ritt\'e4miseksi ennen mekaanisen luiston alkamista.\
+
+\f1\b Vaatimus 2:
+\f0\b0  Menetelm\'e4 renkaan dynaamisen s\'e4teen (R_DYN) laskemiseksi reaaliajassa, jossa:\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\partightenfactor0
+\ls1\ilvl0\cf0 \kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+M\'e4\'e4ritet\'e4\'e4n painumasta johtuva s\'e4teen muutos (
+\f1\b DELTA_R_LOAD
+\f0\b0 ) suhteessa pystysuoraan voimaan (Fz).\
+\ls1\ilvl0\kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+M\'e4\'e4ritet\'e4\'e4n l\'e4mp\'f6tilasta johtuva laajentuminen (
+\f1\b SIGMA_THERM
+\f0\b0 ).\
+\ls1\ilvl0\kerning1\expnd0\expndtw0 {\listtext	\uc0\u8226 	}\expnd0\expndtw0\kerning0
+Yhdistet\'e4\'e4n n\'e4m\'e4 arvot ohjelmallisesti tavoitepy\'f6rimisnopeuden (W_TARGET) synnytt\'e4miseksi kaavalla: 
+\f1\b W_TARGET = GROUND_SPEED / (R_NOMINAL - DELTA_R_LOAD + SIGMA_THERM)
+\f0\b0 .\
+\pard\pardeftab720\partightenfactor0
+
+\f1\b \cf0 Vaatimus 3:
+\f0\b0  Energianhallintayksikk\'f6 (Moduuli 2B), joka sis\'e4lt\'e4\'e4 superkapasitaattoripankin, ja joka on kytketty ohjelmointirajapintaan (API), joka ohjaa jarrutusenergian (
+\f1\b DELTA_E
+\f0\b0 ) kapasitaattoriin aina, kun kiihtyvyysanturi havaitsee negatiivisen kiihtyvyyden (hidastuvuus), joka ylitt\'e4\'e4 kynnysarvon 
+\f1\b SIGMA_DECEL
+\f0\b0 .\
+
+\f1\b Vaatimus 4:
+\f0\b0  Kiihtyvyyden optimointialgoritmi, joka s\'e4\'e4t\'e4\'e4 moottorin v\'e4\'e4nt\'f6momenttia siten, ett\'e4 py\'f6r\'e4n py\'f6rimisnopeus pidet\'e4\'e4n v\'e4lill\'e4 
+\f1\b 1.01 * W_TARGET - 1.05 * W_TARGET
+\f0\b0 , hy\'f6dynt\'e4en akustista pitoindeksi\'e4 reaaliaikaisena takaisinkytkent\'e4n\'e4.\
+
+\f1\b Vaatimus 5:
+\f0\b0  Itseoppiva kalibrointisykli, jossa j\'e4rjestelm\'e4 vertaa optista maanopeutta ja py\'f6rint\'e4nopeutta 50 kilometrin ajon aikana m\'e4\'e4ritt\'e4\'e4kseen renkaan kulumiskertoimen (
+\f1\b WEAR_FACTOR
+\f0\b0 ) ja p\'e4ivitt\'e4\'e4kseen K_TYRE-vakion ohjelmiston muistiin.\
+\
+III. TIIVISTELM\'c4\
+Keksint\'f6 yhdist\'e4\'e4 fyysiset sensorit (Edge) ja matemaattisen mallinnuksen (Kernel) luodakseen ajoneuvon, joka "tuntee" tienpinnan ennen kuin se reagoi siihen. T\'e4m\'e4 v\'e4hent\'e4\'e4 energiankulutusta, parantaa kiihtyvyytt\'e4 ja eliminoi perinteisten ABS/ESP-j\'e4rjestelmien viiveet.\
+}
